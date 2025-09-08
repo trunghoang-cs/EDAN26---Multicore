@@ -9,17 +9,19 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.io._
 
-case class Flow(f: Int)
+case class Flow(f: Int) // case class for data with parameters
 case class Debug(debug: Boolean)
 case class Control(control:ActorRef)
 case class Source(n: Int)
 
-case object Print
+case object Print // case object for singletons for parameterless messages. 
 case object Start
 case object Excess
 case object Maxflow
 case object Sink
 case object Hello
+case object End
+
 
 class Edge(var u: ActorRef, var v: ActorRef, var c: Int) {
 	var	f = 0
@@ -33,7 +35,10 @@ class Node(val index: Int) extends Actor {
 	var	sink:Boolean	= false		/* true if we are the sink.					*/
 	var	edge: List[Edge] = Nil		/* adjacency list with edge objects shared with other nodes.	*/
 	var	debug = false			/* to enable printing.						*/
-	
+	/* 
+		index, e , h is attributes (member variables or instance variables), which hold the state of 
+		each node object. 
+	 */
 	def min(a:Int, b:Int) : Int = { if (a < b) a else b }
 
 	def id: String = "@" + index;
@@ -42,8 +47,22 @@ class Node(val index: Int) extends Actor {
 
 	def status: Unit = { if (debug) println(id + " e = " + e + ", h = " + h) }
 
-	def enter(func: String): Unit = { if (debug) { println(id + " enters " + func); status } }
-	def exit(func: String): Unit = { if (debug) { println(id + " exits " + func); status } }
+	def custom_print (str: String): Unit = 
+		{if (debug) println(str +s" mess from ${id}")}
+	
+	def start_push : Unit = {
+		for (e <- edge){
+			custom_print("start push to " + e.v)
+			// find repecipent 
+			if (e.u == self){
+				e.f = e.c
+				e.v ! Flow(e.c)
+			}
+		}
+	}
+
+	def enter(func: String): Unit = { if (debug) { println(id + " enters " + func); status } } // helper fuunction for debug
+	def exit(func: String): Unit = { if (debug) { println(id + " exits " + func); status } } // helper fuunction for debug
 
 	def relabel : Unit = {
 
@@ -56,7 +75,7 @@ class Node(val index: Int) extends Actor {
 
 	def receive = {
 
-	case Debug(debug: Boolean)	=> this.debug = debug
+	case Debug(debug: Boolean)	=> this.debug = debug /* used to set the debug flag to true */
 
 	case Print => status
 
@@ -66,9 +85,39 @@ class Node(val index: Int) extends Actor {
 
 	case Control(control:ActorRef)	=> this.control = control
 
-	case Sink	=> { sink = true }
+	case Sink	=> 
+		{ 
+			sink = true
+			custom_print("set to sink ") 
+		} 
+	// when receiving the message from the controller, indicating the node is a sink
+	// the sink attribute sets to true. 
 
-	case Source(n:Int)	=> { h = n; source = true }
+	case Source(n:Int)	=> 
+		{ 
+			custom_print("set to source")
+			h = n; 
+			source = true 
+		}
+	/* while receving this the source flag would be set to true */ 
+
+	case Start => {
+		custom_print("start command from controller to " + index)
+		if(source){ start_push }
+	}
+
+	case Flow(f:Int) =>{
+		this.e = f
+		custom_print("update the flow to: " + this.e)
+		for (e <- edge){
+			if(e.u == sender && e.v == self){
+				e.f = f
+				println(s"flow from edge ${e.u} to ${e.v} to ${e.f}") 	
+			}
+		}  
+	}
+
+	
 
 	case _		=> {
 		println("" + index + " received an unknown message" + _) }
@@ -83,7 +132,9 @@ class Preflow extends Actor
 {
 	var	s	= 0;			/* index of source node.					*/
 	var	t	= 0;			/* index of sink node.					*/
-	var	n	= 0;			/* number of vertices in the graph.				*/
+	var	n	= 0;
+	//var flow_start = 0;
+	//var flow_sink = 0;			/* number of vertices in the graph.				*/
 	var	edge:Array[Edge]	= null	/* edges in the graph.						*/
 	var	node:Array[ActorRef]	= null	/* vertices in the graph.					*/
 	var	ret:ActorRef 		= null	/* Actor to send result to.					*/
@@ -95,15 +146,38 @@ class Preflow extends Actor
 		n = node.size
 		s = 0
 		t = n-1
-		for (u <- node)
+		for (u <- node){
 			u ! Control(self)
+			u ! Debug(true)
+		}	
+			
+		// impl for setting the source, sink
+
+		node(s) ! Source(n) // note: use node(index) for array access.
+		node(t) ! Sink
+
+		for (u <- node){
+			u ! Start
+		}
+		
 	}
+	/* 
+		Receives the array of node actors, stores it n,s,t, tells each node who thee controller is.
+	 */
 
 	case edge:Array[Edge] => this.edge = edge
+	/* 
+		receive the array of edges and stores it
+	 */
 
 	case Flow(f:Int) => {
 		ret ! f			/* somebody (hopefully the sink) told us its current excess preflow. */
+	
 	}
+	/* 
+		recive the flow value (from the sink node), and sends it to actor stored in ret
+
+	 */
 
 	case Maxflow => {
 		ret = sender
@@ -153,10 +227,14 @@ object main extends App {
 		node(v) ! edge(i)
 	}
 
-	control ! node
-	control ! edge
+	control ! node // "fire-and-forget" message, sends the array of node actors to Preflow actor
+	control ! edge // the message is delivered and processed whenever the receiver is ready.
 
-	val flow = control ? Maxflow
+	val flow = control ? Maxflow 
+	/*
+		Asynchronous "ask" pattern (request-response)
+		Sends Maxflow message to the Preflow actor and expects a reply.  
+	*/
 	val f = Await.result(flow, t.duration)
 
 	println("f = " + f)
