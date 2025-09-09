@@ -10,6 +10,7 @@ import scala.language.postfixOps
 import scala.io._
 import math.min
 import math.abs
+import scala.concurrent.ExecutionContext.Implicits.global
 
 case class Flow(f: Int) // case class for data with parameters
 case class Debug(debug: Boolean)
@@ -63,6 +64,7 @@ class Node(val index: Int) extends Actor {
 				start_flow += ed.c
 				ed.v ! Flow(ed.c)
 			}
+			e = - start_flow
 		}
 		//println(s"flow from source from beginning ${start_flow} excess preflow from source ${e} ")
 	}
@@ -126,6 +128,9 @@ class Node(val index: Int) extends Actor {
 			if (source){
 				control ! Source(e)  
 			}
+			if (sink){
+				control ! Flow(e)
+			}
 		}
 
 	}
@@ -135,11 +140,11 @@ class Node(val index: Int) extends Actor {
 	}
 
 	case Hello =>{
-		if (e > 0 && !sink){
+		if (e > 0 && !sink && !source){
 			var pushSuccessful = false
 			for (ed <- edge if!pushSuccessful ){
 				if (ed.u == self && ed.c > ed.f){
-					implicit val timeout = Timeout(10.seconds)
+					implicit val timeout = Timeout(20.seconds)
 					var heightFuture = ed.v ? GetHeight
 					var height = Await.result(heightFuture, timeout.duration).asInstanceOf[Int]
 					if (h > height){
@@ -148,12 +153,12 @@ class Node(val index: Int) extends Actor {
 						ed.f += flowToPush
 						//println(s"push from ${index} with flow ${flowToPush}")   
 						ed.v ! Flow(flowToPush)
-						self ! Hello
+						//self ! Hello
 						pushSuccessful = true
 					}
 				}
 				else if (ed.v == self && ed.f > 0){
-					implicit val timeout = Timeout(10.seconds)
+					implicit val timeout = Timeout(20.seconds)
 					var heightFuture = ed.u ? GetHeight
 					var height = Await.result(heightFuture, timeout.duration).asInstanceOf[Int]
 					if (h > height){
@@ -161,9 +166,9 @@ class Node(val index: Int) extends Actor {
 						e -= flowToBack
 						//println(s"before update ${ed.f}")
 						ed.f = ed.f - flowToBack
-						//println(s"push back from ${index} with flow ${ed.f}")   
-						ed.u ! Flow(-ed.f)
-						self ! Hello
+						println(s"push back from ${index} with flow ${ed.f}")   
+						ed.u ! Flow(flowToBack)
+						//self ! Hello
 						pushSuccessful = true
 					}
 				}
@@ -197,7 +202,7 @@ class Preflow extends Actor
 	var	edge:Array[Edge]	= null	/* edges in the graph.						*/
 	var	node:Array[ActorRef]	= null	/* vertices in the graph.					*/
 	var	ret:ActorRef 		= null	/* Actor to send result to.					*/
-
+	
 	def receive = {
 
 	case node:Array[ActorRef]	=> {
@@ -212,8 +217,8 @@ class Preflow extends Actor
 			
 		// impl for setting the source, sink
 
-		node(s) ! Source(n) // note: use node(index) for array access.
 		node(t) ! Sink
+		node(s) ! Source(n) // note: use node(index) for array access.
 
 		for (u <- node){
 			u ! Start
@@ -230,7 +235,19 @@ class Preflow extends Actor
 	 */
 
 	case Flow(f:Int) => {
-		ret ! f			/* somebody (hopefully the sink) told us its current excess preflow. */
+			/* somebody (hopefully the sink) told us its current excess preflow. */
+		implicit val timeout = Timeout(20.seconds)
+		val sourceFuture = node(s) ? Excess
+		val sourceResult = Await.result(sourceFuture, timeout.duration)
+    	val sourceExess = sourceResult match {
+      		case Flow(f) => f
+      		case i: Int => i
+      		case _ => throw new Exception("Unexpected message type for sink excess")
+    	}
+
+		if (f == abs(sourceExess) && ret != null){
+			ret ! f
+		}
 	
 	}
 	/* 
@@ -247,7 +264,7 @@ class Preflow extends Actor
 	
 	case Source(n:Int) =>{
 		var fromSource = abs(n);
-		implicit val timeout = Timeout(2.seconds)
+		implicit val timeout = Timeout(20.seconds)
 		val sinkFuture = node(t) ? Excess
 		val sinkResult = Await.result(sinkFuture, timeout.duration)
     	val sinkExess = sinkResult match {
@@ -268,7 +285,7 @@ class Preflow extends Actor
 }
 
 object main extends App {
-	implicit val t = Timeout(30	.seconds);
+	implicit val t = Timeout(120.seconds);
 
 	val	begin = System.currentTimeMillis()
 	val system = ActorSystem("Main")
@@ -284,6 +301,7 @@ object main extends App {
 	n = s.nextInt
 	m = s.nextInt
 
+	println(s"node ${n} nbr edges ${m} ")
 	/* next ignore c and p from 6railwayplanning */
 	s.nextInt
 	s.nextInt
@@ -300,7 +318,8 @@ object main extends App {
 		val u = s.nextInt
 		val v = s.nextInt
 		val c = s.nextInt
-
+		
+		println(s"edges from ${u} to ${v} capacity ${c}")
 		edge(i) = new Edge(node(u), node(v), c)
 
 		node(u) ! edge(i)
