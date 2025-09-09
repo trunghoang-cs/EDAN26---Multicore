@@ -1,34 +1,38 @@
-# Compiled binaries and executables
+# Ignore build artifacts and outputs in all labs subfolders
+labs/**/target/
+labs/**/out
+labs/**/all-output
+labs/**/target/**/*.class
+labs/**/target/**/*.jar
+labs/**/target/**/*.zip
+labs/**/target/**/*.log
+labs/**/target/streams/
+labs/**/project/target/
+labs/**/.bloop/
+labs/**/.metals/
+labs/**/.vscode/
+labs/**/sbt-dist/
+labs/**/build.sbt
+labs/**/build.properties
+
+# Ignore compiled binaries and executables
 *.out
 *.exe
 *.class
 *.jar
 
-# Object files, shared libraries, and build artifacts
+# Ignore object files, shared libraries, and build artifacts
 *.o
 *.so
 *.dll
 *.a
 
 # Rust build artifacts
-target/
 Cargo.lock
-
-# Scala build artifacts
-target/
-.bloop/
-.metals/
-project/target/
-project/.bloop/
-
-# SBT distribution
-sbt-dist/
 
 # Auxiliary and temporary files
 *.aux
 *.toc
-
-# Backup and swap files
 *~
 *.swp
 
@@ -36,29 +40,16 @@ sbt-dist/
 *.ans
 *.in
 
-# VS Code settings
-.vscode/
-
-# Clojure compiled files
-*.class
-
-# Ignore all-output files
-all-output
-
-# Ignore build files
-build.sbt
-build.properties
-
 # Ignore check-solution scripts
 check-solution.sh
 
 # Other temp files
 CACHEDIR.TAG
 
-# --- Added for labs subfolders ---
-# Ignore Scala/SBT build artifacts and outputs in all labs subfolders
-labs/*/target/
-labs/*/out
-labs/*/all-output
-labs/*/target/streams/
-labs/**/target/**/*.class
+# Ignore Clojure compiled files
+*.class
+
+# Ignore README, makefile, and PDF only if not source (remove if you want to track them)
+# README
+# makefile
+# *.pdf

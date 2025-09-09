@@ -15,8 +15,11 @@ import scala.concurrent.ExecutionContext.Implicits.global
 case class Flow(f: Int) // case class for data with parameters
 case class Debug(debug: Boolean)
 case class Control(control:ActorRef)
-case class Source(n: Int)
-
+case class Source(n: Int) // send to the source node, and inform the height the source would have. 
+case class IncomingFlow(n: Int) // flow was sent by source
+case class OutgoingFlow(n: Int) // flow was received by sink  
+case class PushRequest(node: Int, edge : Edge, flow: Int, height: Int)
+case class Reject(flow: Int)
 
 case object Print // case object for singletons for parameterless messages. 
 case object Start
@@ -24,6 +27,7 @@ case object Excess
 case object Maxflow
 case object Sink
 case object Hello
+case object Accept
 case object GetHeight
 
 
@@ -38,7 +42,9 @@ class Node(val index: Int) extends Actor {
 	var	source:Boolean	= false		/* true if we are the source.					*/
 	var	sink:Boolean	= false		/* true if we are the sink.					*/
 	var	edge: List[Edge] = Nil		/* adjacency list with edge objects shared with other nodes.	*/
-	var	debug = false			/* to enable printing.						*/
+	var	debug = false			/* to enable printing. */
+	var pushRequest = 0
+	var listIndex = 0 						
 	/* 
 		index, e , h is attributes (member variables or instance variables), which hold the state of 
 		each node object. 
@@ -56,15 +62,16 @@ class Node(val index: Int) extends Actor {
 	
 	def start_push : Unit = {
 		var start_flow = 0;
-		for (ed <- edge){
-			custom_print("start push to " + ed.v)
-			// find repecipent 
-			if (ed.u == self){
+		for (ed <- edge){  
+			 
+			if (ed.u == self){ // forward-push from start
+			custom_print("start to push to " + ed.v)
 				ed.f = ed.c
-				start_flow += ed.c
-				ed.v ! Flow(ed.c)
+				e -= ed.c
+				ed.v ! PushRequest(index, ed, ed.c, h)
+				pushRequest += 1
 			}
-			e = - start_flow
+			
 		}
 		//println(s"flow from source from beginning ${start_flow} excess preflow from source ${e} ")
 	}
@@ -79,6 +86,41 @@ class Node(val index: Int) extends Actor {
 		h += 1
 
 		exit("relabel")
+	}
+	
+	def pushToNeighbours() : Unit ={
+		if(pushRequest > 0) return // wait until the excess flow updated correctly (the last accept or reject)			 
+		if (!sink && !source && e > 0){
+			if (listIndex == edge.length ) {
+				listIndex = 0
+				relabel
+			}
+			for(i <- listIndex until edge.length){
+				if (e == 0){
+					return
+				}
+				var currentEdge = edge(i);
+				if (currentEdge.u == self && currentEdge.f < currentEdge.c ){ // forward-push 
+					var flowToPush = min(e, currentEdge.c - currentEdge.f)
+					e -= flowToPush
+					currentEdge.f += flowToPush
+					currentEdge.v ! PushRequest(index, currentEdge, flowToPush, h)
+					pushRequest += 1
+					 
+				} 
+				else if(currentEdge.v == self && currentEdge.f > 0){ // backward-push 
+					var flowToPushBack = min(e, currentEdge.f)
+					e -= flowToPushBack
+					currentEdge.f -= flowToPushBack
+					currentEdge.u ! PushRequest(index, currentEdge, flowToPushBack, h)
+					pushRequest += 1
+					
+				}
+				listIndex +=1	 
+			}	  
+		}
+		if (!sink && ! source && e > 0 ) pushToNeighbours // after the loop, if the are still excess preflow left
+		
 	}
 
 	def receive = {
@@ -105,85 +147,50 @@ class Node(val index: Int) extends Actor {
 		{ 
 			custom_print("set to source")
 			h = n; 
-			source = true 
+			source = true
+			start_push
 		}
 	/* while receving this the source flag would be set to true */ 
 
-	case Start => {
-		custom_print("start command from controller to " + index)
-		if(source){ start_push }
-	}
-
-	case Flow(f:Int) =>{
-		e += f
-		custom_print("update the flow to: " + e)
-		//for (e <- edge){
-		//	if(e.v == sender || e.u == sender){
-		//		e.f += f
-				//println(s"flow from edge ${e.u} to ${e.v} to ${e.f}") 	
-		//	}
-		//}
-		if(!source && !sink){ self ! Hello }
+	case PushRequest(node: Int, edge : Edge, flow: Int, height: Int) => {
+		custom_print("get push request from "  +id )
+		var sender = other(edge, self)
+		if (height > h){
+			e += flow
+			sender ! Accept
+			if (sink) control ! OutgoingFlow(e)
+			if (source) control ! IncomingFlow(e)
+		}
 		else{
-			if (source){
-				control ! Source(e)  
+			if (edge.u == sender){
+				edge.f -= flow // forward-push request
 			}
-			if (sink){
-				control ! Flow(e)
+			else{
+				edge.f += flow // backward-push request
 			}
+			sender ! Reject(flow)
 		}
+		
+		if(!sink && ! source) pushToNeighbours
 
-	}
-
-	case GetHeight =>{
-		sender ! h // send back the current height. 
-	}
-
-	case Hello =>{
-		if (e > 0 && !sink && !source){
-			var pushSuccessful = false
-			for (ed <- edge if!pushSuccessful ){
-				if (ed.u == self && ed.c > ed.f){
-					implicit val timeout = Timeout(20.seconds)
-					var heightFuture = ed.v ? GetHeight
-					var height = Await.result(heightFuture, timeout.duration).asInstanceOf[Int]
-					if (h > height){
-						var flowToPush = min(e, ed.c - ed.f)
-						e -= flowToPush
-						ed.f += flowToPush
-						//println(s"push from ${index} with flow ${flowToPush}")   
-						ed.v ! Flow(flowToPush)
-						//self ! Hello
-						pushSuccessful = true
-					}
-				}
-				else if (ed.v == self && ed.f > 0){
-					implicit val timeout = Timeout(20.seconds)
-					var heightFuture = ed.u ? GetHeight
-					var height = Await.result(heightFuture, timeout.duration).asInstanceOf[Int]
-					if (h > height){
-						var flowToBack = min(e, ed.f)
-						e -= flowToBack
-						//println(s"before update ${ed.f}")
-						ed.f = ed.f - flowToBack
-						println(s"push back from ${index} with flow ${ed.f}")   
-						ed.u ! Flow(flowToBack)
-						//self ! Hello
-						pushSuccessful = true
-					}
-				}
-
-			}
-			if(pushSuccessful){
-				if (e > 0){
-					self ! Hello
-				}
-			}else{
-				relabel
-				self ! Hello
-			}
-		}
 	} 
+
+	case Accept => {
+		custom_print("push acepted " + id)
+		pushRequest -= 1
+		pushToNeighbours()
+		
+		if(source){
+			control ! IncomingFlow(e)
+		}
+	}
+
+	case Reject(flow: Int) => {
+		custom_print("push rejected " + id)
+		pushRequest -= 1
+		e += flow
+		pushToNeighbours()
+	}
 	
 	case _		=> {
 		println("" + index + " received an unknown message" + _) }
@@ -202,7 +209,9 @@ class Preflow extends Actor
 	var	edge:Array[Edge]	= null	/* edges in the graph.						*/
 	var	node:Array[ActorRef]	= null	/* vertices in the graph.					*/
 	var	ret:ActorRef 		= null	/* Actor to send result to.					*/
-	
+	var incommingFlow = 0;
+	var outgoingFlow = 0;
+
 	def receive = {
 
 	case node:Array[ActorRef]	=> {
@@ -219,10 +228,7 @@ class Preflow extends Actor
 
 		node(t) ! Sink
 		node(s) ! Source(n) // note: use node(index) for array access.
-
-		for (u <- node){
-			u ! Start
-		}
+		//node(s) ! Start
 		
 	}
 	/* 
@@ -234,22 +240,7 @@ class Preflow extends Actor
 		receive the array of edges and stores it
 	 */
 
-	case Flow(f:Int) => {
-			/* somebody (hopefully the sink) told us its current excess preflow. */
-		implicit val timeout = Timeout(20.seconds)
-		val sourceFuture = node(s) ? Excess
-		val sourceResult = Await.result(sourceFuture, timeout.duration)
-    	val sourceExess = sourceResult match {
-      		case Flow(f) => f
-      		case i: Int => i
-      		case _ => throw new Exception("Unexpected message type for sink excess")
-    	}
-
-		if (f == abs(sourceExess) && ret != null){
-			ret ! f
-		}
 	
-	}
 	/* 
 		recive the flow value (from the sink node), and sends it to actor stored in ret
 
@@ -262,21 +253,20 @@ class Preflow extends Actor
 		//node(t) ! Excess	/* ask sink for its excess preflow (which certainly still is zero). */
 	}
 	
-	case Source(n:Int) =>{
-		var fromSource = abs(n);
-		implicit val timeout = Timeout(20.seconds)
-		val sinkFuture = node(t) ? Excess
-		val sinkResult = Await.result(sinkFuture, timeout.duration)
-    	val sinkExess = sinkResult match {
-      		case Flow(f) => f
-      		case i: Int => i
-      		case _ => throw new Exception("Unexpected message type for sink excess")
-    	}
+	case IncomingFlow(flow: Int) => {
+		println("get flow from source " + flow)
+		incommingFlow = abs(flow)
+		if (incommingFlow == outgoingFlow){
+			ret ! outgoingFlow
+		}
+	}
 
-		if (fromSource == sinkExess && ret != null){
-			ret ! sinkExess
-		} 
-		
+	case OutgoingFlow(flow: Int) => {
+		println("get flow from sink " + flow)
+		outgoingFlow = flow
+		if(outgoingFlow == incommingFlow){
+			ret ! outgoingFlow
+		}
 	}
 		
 	
