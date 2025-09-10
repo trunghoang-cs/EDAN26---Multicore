@@ -19,7 +19,7 @@ case class Source(n: Int) // send to the source node, and inform the height the 
 case class IncomingFlow(n: Int) // flow was sent by source
 case class OutgoingFlow(n: Int) // flow was received by sink  
 case class PushRequest(node: Int, edge : Edge, flow: Int, height: Int)
-case class Reject(flow: Int)
+case class Reject(flow: Int, edge: Edge)
 case class Done(status: Boolean)
 
 case object Print // case object for singletons for parameterless messages. 
@@ -73,6 +73,12 @@ class Node(val index: Int) extends Actor {
 				ed.v ! PushRequest(index, ed, ed.c, h)
 				pushRequest += 1
 			}
+			else{
+				ed.f = ed.c 
+				e -= ed.c
+				ed.u ! PushRequest(index, ed, ed.c, h)
+				pushRequest +=1
+			}
 			
 		}
 		//println(s"flow from source from beginning ${start_flow} excess preflow from source ${e} ")
@@ -97,6 +103,7 @@ class Node(val index: Int) extends Actor {
 				listIndex = 0
 				relabel
 			}
+			//var second_loop = listIndex
 			for(i <- listIndex until edge.length){
 				if (e == 0){
 					return
@@ -110,16 +117,17 @@ class Node(val index: Int) extends Actor {
 					pushRequest += 1
 					 
 				} 
-				else if(currentEdge.v == self && currentEdge.f > 0){ // backward-push 
-					var flowToPushBack = min(e, currentEdge.f)
-					e -= flowToPushBack
+				else if(currentEdge.v == self ){ // backward-push 
+					var flowToPushBack = min(e, currentEdge.f + currentEdge.c)
+					e -= flowToPushBack	
 					currentEdge.f -= flowToPushBack
 					currentEdge.u ! PushRequest(index, currentEdge, flowToPushBack, h)
 					pushRequest += 1
 					
 				}
 				listIndex +=1	 
-			}	  
+			}
+			 
 		}
 		if (!sink && ! source && e > 0 ) pushToNeighbours // after the loop, if the are still excess preflow left
 		
@@ -165,13 +173,7 @@ class Node(val index: Int) extends Actor {
 			if (source) control ! IncomingFlow(e)
 		}
 		else{
-			if (edge.u == sender){
-				edge.f -= flow // forward-push request
-			}
-			else{
-				edge.f += flow // backward-push request
-			}
-			sender ! Reject(flow)
+			sender ! Reject(flow,edge)
 		}
 		
 		if(!sink && ! source) pushToNeighbours
@@ -181,18 +183,25 @@ class Node(val index: Int) extends Actor {
 	case Accept => {
 		custom_print("push acepted " + id)
 		pushRequest -= 1
-		pushToNeighbours()
+		pushToNeighbours
 		
 		if(source){
 			control ! IncomingFlow(e)
 		}
 	}
 
-	case Reject(flow: Int) => {
+	case Reject(flow: Int, edge: Edge) => {
 		custom_print("push rejected " + id)
 		pushRequest -= 1
 		e += flow
-		pushToNeighbours()
+		if (edge.u == sender){
+				edge.f += flow // forward-push request
+			}
+		else{
+			edge.f -= flow // backward-push request
+		}
+		
+		pushToNeighbours
 	}
 
 	case IsDone =>{
@@ -274,7 +283,7 @@ class Preflow extends Actor
 	}
 	
 	case IncomingFlow(flow: Int) => {
-		println("get flow from source " + flow)
+		//println("get flow from source " + flow)
 		incommingFlow = abs(flow)
 		if (incommingFlow == outgoingFlow){
 			sendFinishRequestToNodes
@@ -282,7 +291,7 @@ class Preflow extends Actor
 	}
 
 	case OutgoingFlow(flow: Int) => {
-		println("get flow from sink " + flow)
+		//println("get flow from sink " + flow)
 		outgoingFlow = flow
 		if(outgoingFlow == incommingFlow){
 			sendFinishRequestToNodes
@@ -290,7 +299,7 @@ class Preflow extends Actor
 	}
 	
 	case Done(status : Boolean) =>{
-		println("Controller get feedback from IsDone request: " + status)
+		//println("Controller get feedback from IsDone request: " + status)
 		if (status){
 			counter += 1 
 			if (counter == (node.length - 2)){ // all nodes (exclusive source and sink ) have no excess flow left.
@@ -307,7 +316,7 @@ class Preflow extends Actor
 }
 
 object main extends App {
-	implicit val t = Timeout(120.seconds);
+	implicit val t = Timeout(160.seconds);
 
 	val	begin = System.currentTimeMillis()
 	val system = ActorSystem("Main")
