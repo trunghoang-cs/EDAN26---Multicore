@@ -20,6 +20,7 @@ case class IncomingFlow(n: Int) // flow was sent by source
 case class OutgoingFlow(n: Int) // flow was received by sink  
 case class PushRequest(node: Int, edge : Edge, flow: Int, height: Int)
 case class Reject(flow: Int)
+case class Done(status: Boolean)
 
 case object Print // case object for singletons for parameterless messages. 
 case object Start
@@ -29,6 +30,7 @@ case object Sink
 case object Hello
 case object Accept
 case object GetHeight
+case object IsDone
 
 
 class Edge(var u: ActorRef, var v: ActorRef, var c: Int) {
@@ -123,6 +125,7 @@ class Node(val index: Int) extends Actor {
 		
 	}
 
+
 	def receive = {
 
 	case Debug(debug: Boolean)	=> this.debug = debug /* used to set the debug flag to true */
@@ -191,12 +194,24 @@ class Node(val index: Int) extends Actor {
 		e += flow
 		pushToNeighbours()
 	}
+
+	case IsDone =>{
+		custom_print("get finish request from controller, current flow: " +e)
+		if (e == 0){
+			control ! Done(true)
+		}else if(e > 0){
+			control ! Done(false)
+		}
+
+	}
 	
 	case _		=> {
 		println("" + index + " received an unknown message" + _) }
 
 		assert(false)
 	}
+
+	
 
 }
 
@@ -211,6 +226,13 @@ class Preflow extends Actor
 	var	ret:ActorRef 		= null	/* Actor to send result to.					*/
 	var incommingFlow = 0;
 	var outgoingFlow = 0;
+	var counter = 0 
+
+	def sendFinishRequestToNodes{
+		for (i <- 1 until node.length -1 ){ // the Finnish request sends to all the nodes, except sink and source 
+			node(i) ! IsDone
+		}
+	}
 
 	def receive = {
 
@@ -248,8 +270,6 @@ class Preflow extends Actor
 
 	case Maxflow => {
 		ret = sender
-
-		
 		//node(t) ! Excess	/* ask sink for its excess preflow (which certainly still is zero). */
 	}
 	
@@ -257,7 +277,7 @@ class Preflow extends Actor
 		println("get flow from source " + flow)
 		incommingFlow = abs(flow)
 		if (incommingFlow == outgoingFlow){
-			ret ! outgoingFlow
+			sendFinishRequestToNodes
 		}
 	}
 
@@ -265,7 +285,19 @@ class Preflow extends Actor
 		println("get flow from sink " + flow)
 		outgoingFlow = flow
 		if(outgoingFlow == incommingFlow){
-			ret ! outgoingFlow
+			sendFinishRequestToNodes
+		}
+	}
+	
+	case Done(status : Boolean) =>{
+		println("Controller get feedback from IsDone request: " + status)
+		if (status){
+			counter += 1 
+			if (counter == (node.length - 2)){ // all nodes (exclusive source and sink ) have no excess flow left.
+				ret ! outgoingFlow
+			}
+		}else{
+			counter = 0 // wait for next update from sink or source
 		}
 	}
 		
@@ -291,7 +323,7 @@ object main extends App {
 	n = s.nextInt
 	m = s.nextInt
 
-	println(s"node ${n} nbr edges ${m} ")
+	//println(s"node ${n} nbr edges ${m} ")
 	/* next ignore c and p from 6railwayplanning */
 	s.nextInt
 	s.nextInt
@@ -309,7 +341,7 @@ object main extends App {
 		val v = s.nextInt
 		val c = s.nextInt
 		
-		println(s"edges from ${u} to ${v} capacity ${c}")
+		//println(s"edge from ${u} to ${v} capacity ${c}")
 		edge(i) = new Edge(node(u), node(v), c)
 
 		node(u) ! edge(i)

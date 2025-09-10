@@ -14,6 +14,7 @@ labs/**/.vscode/
 labs/**/sbt-dist/
 labs/**/build.sbt
 labs/**/build.properties
+lab1/all-output
 
 # Ignore compiled binaries and executables
 *.out
