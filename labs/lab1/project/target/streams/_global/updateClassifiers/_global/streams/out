@@ -1,4 +1,0 @@
-[warn] sbt-bloop-2.0.2-sources.jar no longer exists at /C:/Users/Admin/AppData/Local/Coursier/cache/v1/https/repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/2.0.2/sbt-bloop-2.0.2-sources.jar
-[debug] "not up to date. inChanged = false, force = false
-[debug] Updating ProjectRef(uri("file:/mnt/c/users/admin/onedrive/skrivbord/LTHsAllaKurser/EDAN26-Multicore/labs/lab1/project/"), "lab1-build")...
-[debug] Done updating ProjectRef(uri("file:/mnt/c/users/admin/onedrive/skrivbord/LTHsAllaKurser/EDAN26-Multicore/labs/lab1/project/"), "lab1-build")

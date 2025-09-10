@@ -6,7 +6,7 @@ do
 	pre=${x%.in}
 	ans=$pre.ans
 	$* < $x > all-output
-	grep '^f =' all-output | sed 's/f = //' > out
+	grep -E '^[0-9]+$' all-output > out
 	if diff $ans out
 	then
 		echo PASS $x 
@@ -23,7 +23,7 @@ do
 	pre=${x%.in}
 	ans=$pre.ans
 	$* < $x > all-output
-	grep '^f =' all-output | sed 's/f = //' > out
+	grep -E '^[0-9]+$' all-output > out
 	if diff $ans out
 	then
 		echo PASS $x 
