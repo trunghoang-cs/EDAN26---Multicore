@@ -451,7 +451,7 @@ void *work_(void *arg){
             }
 
             if(graph->active_thread == 0){
-                pthread_cond_signal(&graph->excess_cond);
+                pthread_cond_broadcast(&graph->excess_cond);
                 pthread_mutex_unlock(&graph->active_thread_lock);
                 return NULL;
             }
