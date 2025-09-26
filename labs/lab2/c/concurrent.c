@@ -12,7 +12,8 @@
 // #include "queue.h"
 
 #define PRINT 0 /* enable/disable prints. */
-#define NBR_THREADS 15
+#define NBR_THREADS 1
+
 
 #if PRINT
 #define pr(...)                       \
@@ -48,7 +49,7 @@ typedef struct queue_item_t queue_item_t;
 
 struct queue_item_t{
     
-    int node_index;
+    node_t* node;									// TODO: change from int to node. check logic for the rest. 
     queue_item_t* next;
 };
 
@@ -92,8 +93,8 @@ struct graph_t
 
 	int n;			/* number of nodes.			*/
 	int m;			/* number of edges			*/
-	node_t *v;		/* pointer to array of n nodes.		*/
-	edge_t *e;		/* pointer to array of m edges.		*/
+	node_t *v;		/* pointer to array of n nodes. pointer to the first node in the array */
+	edge_t *e;		/* pointer to array of m edges.	pointer to the first edge in the array. 	*/
     node_t *s;		/* pointer to the source.			*/
 	node_t *t;		/* pointer to the sink.			*/
 	node_t *excess; /* nodes with e > 0 except s,t.	*/
@@ -101,15 +102,16 @@ struct graph_t
 	pthread_mutex_t graph_lock;
     pthread_mutex_t active_thread_lock;
 	pthread_cond_t excess_cond;
-    struct thread_queue_t** thread_queues;
-    int nbr_threads;
-};
+    thread_queue_t** thread_queues;    // Array of pointers to per-thread queues. 
+    int nbr_threads;						  // *  pointer to a struct.
+};											  // **	pointer to a pointer to a struct
+											  // in the implementation, first pointer point to an array of pointer.				
 
 typedef struct{
-    void *g;    //graph
-    int start;  //start index of node array
-    int end;    //end index of node array
-    int id; //thread ID
+    void *g;    		//graph
+    int start;  		//start index of node array
+    int end;    		//end index of node array
+    int id; 			//thread ID
     // int t;  //number of threads
 }thread_args_t;
 
@@ -290,64 +292,68 @@ static void *xcalloc(size_t n, size_t s)
 
 
 
-void init_thread_queue(thread_queue_t** q){
-    *q = xmalloc(sizeof(thread_queue_t));
-
+void init_thread_queue(thread_queue_t** q){         // args: pointer to pointer
+    *q = xmalloc(sizeof(thread_queue_t));           // *q means dereference q == get what q points to. 
+													// when the xmalloc operation is executed, it is when the *q gets its actual value. 
     //temp head
-    queue_item_t* tmp = xmalloc(sizeof(queue_item_t));
-    tmp->next = NULL;
+    queue_item_t* tmp = xmalloc(sizeof(queue_item_t));  // sentinel node to simplify queue operation. 
+    tmp->next = NULL;                                     
 
-    (*q)->head = (*q)->tail = tmp;
-    pthread_mutex_init(&(*q)->h_lock, NULL);
+    (*q)->head = (*q)->tail = tmp;                      // both head and tail point to something (never NULL)
+    pthread_mutex_init(&(*q)->h_lock, NULL);			// init mutex_thread_lock
     pthread_mutex_init(&(*q)->t_lock, NULL);
 }
 
 
 int get_thread_for_node(graph_t* g, node_t* node){
-    int node_index = node - g->v;   //pointer arithmetic to get current node index
-    int nodes_per_thread = (g->n + g->nbr_threads - 1) / g->nbr_threads;
-    int thread_id = node_index / nodes_per_thread;
+    int node_index = node - g->v;   										//pointer arithmetic to calculate the node's position in the array. 
+    int nodes_per_thread = (g->n + g->nbr_threads - 1) / g->nbr_threads;    //the nbr of nodes per thread, used Celling division. 
+    int thread_id = node_index / nodes_per_thread;							// calcuate the thread index. 	
 
-    if(thread_id >= g->nbr_threads){
-        return g->nbr_threads - 1;  //-1 for 0 index
+    if(thread_id >= g->nbr_threads){  // Bounds checking, should never be triggered. 
+        return g->nbr_threads - 1;  
     }else{
         return thread_id;
     }
-}
+} 
 
-void enqueue_node_index(thread_queue_t* q, int node_index, node_t* v){
+void enqueue_node_index(thread_queue_t* q, int node_index, node_t* node){  // TODO: item take node
     queue_item_t* item = xmalloc(sizeof(queue_item_t));
-    item->node_index = node_index;
+    item->node = node;
     item->next = NULL;
 
-    pthread_mutex_lock(&q->t_lock);     //t_lock originally
-    q->tail->next = item;
+    pthread_mutex_lock(&q->t_lock);     //thread_queue lock.
+    q->tail->next = item;			     
     q->tail = item;
-    v->queued = true;
-    pthread_mutex_unlock(&q->t_lock);   //t_lock originally
+    //v->queued = true;					 
+    pthread_mutex_unlock(&q->t_lock);   //thread_queue unlock.
 }
 
-int dequeue_node_index(thread_queue_t* q, graph_t* g){
-    pthread_mutex_lock(&q->h_lock);
+node_t* dequeue_node_index(thread_queue_t* q, graph_t* g){              // TODO: item take nod, return address to a node.
+    pthread_mutex_lock(&q->h_lock);          // queue lock
 
-    queue_item_t* old_head = q->head;
-    queue_item_t* new_head = old_head->next;
-
-    if(new_head == NULL){
+    queue_item_t* current_head = q->head->next; // head points at the sentinel node.
+    if(current_head == NULL){
         pthread_mutex_unlock(&q->h_lock);
-        return -1;  //empty
+        return NULL;  
     }
-
-    int node_index = new_head->node_index;
-    q->head = new_head;
-    g->v[node_index].queued = false;
-    pthread_mutex_unlock(&q->h_lock);
-
-    free(old_head);
-    return node_index;
+	node_t* to_return = current_head -> node;
+	//int node_index = current_head -> node_index;    // the first avaiable node. 
+    queue_item_t* next_head = current_head -> next;
+	if (next_head == NULL){
+		q->head->next = NULL;
+		//g->v[node_index].queued = false;	 
+	}else{
+		q->head->next = next_head;                         
+		//g->v[node_index].queued = false;           
+	} 
+	
+    free(current_head);
+    pthread_mutex_unlock(&q->h_lock);       // queue unlock
+    return to_return;                      
 }
 
-bool queue_is_empty(thread_queue_t* q){
+bool queue_is_empty(thread_queue_t* q){   // TODO: check the logic: sentinel removed.
     pthread_mutex_lock(&q->h_lock);
     bool empty = (q->head->next == NULL);
     pthread_mutex_unlock(&q->h_lock);
@@ -358,7 +364,7 @@ void enter_excess_queue(graph_t* g, node_t* v){
     if(v != g->t && v != g->s && !v->queued){
         int target_thread = v->thread_id;
         enqueue_node_index(g->thread_queues[target_thread], v->id, v);
-        pthread_cond_signal(&g->excess_cond);
+        pthread_cond_signal(&g->excess_cond);  							//TODO: signify just one random thread.
     }
 }
 
@@ -415,7 +421,30 @@ void decrement_active_threads(graph_t* g){
 }
 
 bool terminate_req(graph_t* g){
-    return g->s->e + g->t->e != 0;
+	pthread_mutex_lock(&g->s->node_lock);
+	pthread_mutex_lock(&g->t->node_lock);
+    bool re = ((g->s->e + g->t->e != 0) && (g -> active_thread == 0));
+	pthread_mutex_unlock(&g->s->node_lock);
+	pthread_mutex_unlock(&g->t->node_lock);
+	return re;
+}
+
+node_t* get_work_node(graph_t* graph, int id) {
+    node_t* target_node = NULL;
+    
+    if (!queue_is_empty(graph->thread_queues[id])) {
+        target_node = dequeue_node_index(graph->thread_queues[id], graph);
+    } else {
+        for (int i = 0; i < graph->nbr_threads; i++) {
+            if (i == id) continue;  // Fixed: was assignment (=), should be comparison (==)
+            if (!queue_is_empty(graph->thread_queues[i])) {
+                target_node = dequeue_node_index(graph->thread_queues[i], graph);
+                break;
+            }
+        }
+    }
+    
+    return target_node;
 }
 
 void *work(void *arg){
@@ -433,69 +462,25 @@ void *work(void *arg){
     int id = args->id;
 
     while(true){
+		node_t* u = get_work_node(graph, id);
+		
+        while(u == NULL){
+        	if( terminate_req(graph)){
+				pthread_mutex_lock(&graph->active_thread_lock);
+            	pthread_cond_broadcast(&graph->excess_cond);
+            	pthread_mutex_unlock(&graph->active_thread_lock);
+            	return NULL;
+        	}else{
+				pthread_mutex_lock(&graph->active_thread_lock);
+				pthread_cond_wait(&graph->excess_cond, &graph->active_thread_lock);
 
-        pthread_mutex_lock(&graph->active_thread_lock);
-
-        while(queue_is_empty(graph->thread_queues[id])){
-            
-            if(active_before){
-                graph->active_thread--;
-                // pthread_mutex_unlock(&graph->active_thread_lock);
-                active_before = false;
-            }
-
-            bool work_fetched = false;
-            pthread_mutex_unlock(&graph->active_thread_lock);
-
-            for(int i = 0 ; i < graph->nbr_threads && !work_fetched ; i++){ 
-                if(i != id && !queue_is_empty(graph->thread_queues[i])){    //loop through all thread queues to find work
-                    
-                    int fetched_node = dequeue_node_index(graph->thread_queues[i], graph);
-                    if(fetched_node != -1){ //if queue wasn't empty
-                        enqueue_node_index(graph->thread_queues[id], fetched_node, &graph->v[fetched_node]); //push onto own threads work queue
-                        work_fetched = true;
-                        break;
-                    }
-                }
-            }
-
-            pthread_mutex_lock(&graph->active_thread_lock);
-
-            if(work_fetched){   //break out of waiting if we found a node
-                break;
-            }
-
-
-            if(graph->active_thread == 0){
-                bool has_work = false;
-                for(int i = 0; i < graph->nbr_threads && !has_work; i++){
-                    if(!queue_is_empty(graph->thread_queues[i])){
-                        has_work = true;
-                    }
-                }
-
-                if(!has_work && terminate_req(graph)){
-                    pthread_cond_broadcast(&graph->excess_cond);
-                    pthread_mutex_unlock(&graph->active_thread_lock);
-                    return NULL;
-                }
-            }
-            pthread_cond_wait(&graph->excess_cond, &graph->active_thread_lock);
-        }
-
-        if(!active_before){
-            graph->active_thread++;
-            active_before = true;
+			}
+			u = get_work_node(graph, id);      
         }
 
         pthread_mutex_unlock(&graph->active_thread_lock);
 
-        int node_index = dequeue_node_index(graph->thread_queues[id], graph); //dequeue from now queue
-        if(node_index == -1){
-            continue;
-        }
-
-        u = &graph->v[node_index];
+        
         edges = u->edge;
         v = NULL;
 
