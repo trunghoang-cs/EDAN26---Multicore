@@ -12,7 +12,7 @@
 // #include "queue.h"
 
 #define PRINT 0 /* enable/disable prints. */
-#define NBR_THREADS 3
+#define NBR_THREADS 9
 
 
 #if PRINT
@@ -362,10 +362,10 @@ bool queue_is_empty(thread_queue_t* q){   // TODO: check the logic: sentinel rem
 }
 
 void enter_excess_queue(graph_t* g, node_t* v){
-    if(v != g->t && v != g->s && !v->queued){
+    if(v != g->t && v != g->s){
         int target_thread = v->thread_id;
         enqueue_node_index(g->thread_queues[target_thread], v->id, v);
-        pthread_cond_signal(&g->excess_cond);  							//TODO: signify just one random thread.
+        pthread_cond_broadcast(&g->excess_cond);  							//TODO: signify just one random thread.
     }
 }
 
@@ -422,12 +422,19 @@ void decrement_active_threads(graph_t* g){
 }
 
 bool terminate_req(graph_t* g){
+	bool re = false;
 	pthread_mutex_lock(&g->s->node_lock);
 	pthread_mutex_lock(&g->t->node_lock);
-    bool re = g->s->e + g->t->e != 0 ;
+    if ( g->s->e + g->t->e != 0){
+		re = true;
+	}
 	pthread_mutex_unlock(&g->s->node_lock);
 	pthread_mutex_unlock(&g->t->node_lock);
 	return re;
+}
+
+bool terminate_req2(graph_t* g){
+	return g ->active_thread == 0;
 }
 
 node_t* get_work_node(graph_t* graph, int id) {
@@ -437,7 +444,7 @@ node_t* get_work_node(graph_t* graph, int id) {
         target_node = dequeue_node_index(graph->thread_queues[id], graph);
     } else {
         for (int i = 0; i < graph->nbr_threads; i++) {
-            if (i == id) continue;  // Fixed: was assignment (=), should be comparison (==)
+            if (i == id) continue;  
             if (!queue_is_empty(graph->thread_queues[i])) {
                 target_node = dequeue_node_index(graph->thread_queues[i], graph);
                 break;
@@ -446,6 +453,15 @@ node_t* get_work_node(graph_t* graph, int id) {
     }
     
     return target_node;
+}
+
+bool all_queues_empty(graph_t* g) {
+    for (int i = 0; i < g->nbr_threads; i++) {
+        if (!queue_is_empty(g->thread_queues[i])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void *work(void *arg){
@@ -464,20 +480,30 @@ void *work(void *arg){
 
     while(true){
 		
-		node_t* u = get_work_node(graph, id);
-		        
+		node_t* u = get_work_node(graph, id);        
     	while(u == NULL){
 			pthread_mutex_lock(&graph->active_thread_lock);
-			if(terminate_req(graph)){
+			
+			if(terminate_req(graph) && terminate_req2(graph)){
     			pthread_cond_broadcast(&graph->excess_cond);
     			pthread_mutex_unlock(&graph->active_thread_lock);
         		return NULL;
     		}
+			if (active_before){
+				graph -> active_thread --;
+				active_before = false;
+			}
     		pthread_cond_wait(&graph->excess_cond, &graph->active_thread_lock);
     		pthread_mutex_unlock(&graph->active_thread_lock);
     		u = get_work_node(graph, id);      
 		}
         
+		if(!active_before){
+			pthread_mutex_lock(&graph->active_thread_lock);
+			graph ->active_thread ++;
+			pthread_mutex_unlock(&graph->active_thread_lock);
+			active_before = true;
+		}
 
         edges = u->edge;
         v = NULL;
@@ -517,13 +543,13 @@ void *work(void *arg){
             push(graph, u, v, e);
             pthread_mutex_unlock(&v->node_lock);
             pthread_mutex_unlock(&u->node_lock);
-            pthread_cond_broadcast(&graph->excess_cond);
+            //pthread_cond_broadcast(&graph->excess_cond);
 
         }else{
             pthread_mutex_lock(&u->node_lock);
             relabel(graph, u);
             pthread_mutex_unlock(&u->node_lock);
-            pthread_cond_broadcast(&graph->excess_cond);
+            //pthread_cond_broadcast(&graph->excess_cond);
         }
     }
 
