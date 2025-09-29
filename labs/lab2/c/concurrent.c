@@ -539,7 +539,7 @@ int preflow(graph_t *g)
 	list_t *p;
 	int b;
 	int t;
-	t = 9; // nbr of thread
+	t = 15; // nbr of thread
 	pthread_t thread[t];
 
 	s = g->s;
