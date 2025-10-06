@@ -28,7 +28,7 @@
 #define pr(...) /* no effect at all */
 #endif
 
-const int NUM_THREADS = 9;
+const int NUM_THREADS = 15;
 
 #define MIN(a, b) (((a) <= (b)) ? (a) : (b))
 
