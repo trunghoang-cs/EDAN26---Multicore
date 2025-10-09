@@ -1,1 +1,9 @@
-For C, continue with the code from Lab 2
+to compile with clang
+
+clang -g -pthread concurrent.c -o concurrent
+
+to run with valgrind/helgrind:
+
+valgrind --tool=helgrind ./preflow < ../../data
+
+

@@ -45,7 +45,7 @@ typedef struct graph_t graph_t;
 typedef struct node_t node_t;
 typedef struct edge_t edge_t;
 typedef struct list_t list_t;
-typedef struct decision_t decision_t; /* decisions*/
+typedef struct decision_t decision_t; 
 
 struct list_t
 {
@@ -59,7 +59,6 @@ struct node_t
 	int e;		  /* excess flow.			*/
 	list_t *edge; /* adjacency list.		*/
 	node_t *next; /* with excess preflow.		*/
-	pthread_mutex_t node_lock;
 };
 
 struct edge_t
@@ -68,24 +67,22 @@ struct edge_t
 	node_t *v; /* the other. 			*/
 	int f;	   /* flow > 0 if from u to v.	*/
 	int c;	   /* capacity.			*/
-	pthread_mutex_t edge_lock;
 };
 
 struct graph_t
 {
 
-	int n;			/* number of nodes.			*/
-	int m;			/* number of edges			*/
-	node_t *v;		/* pointer to array of n nodes.		*/
-	edge_t *e;		/* pointer to array of m edges.		*/
-	node_t *s;		/* pointer to the source.			*/
-	node_t *t;		/* pointer to the sink.			*/
-	node_t *excess; /* nodes with e > 0 except s,t.	*/
+	int n;									/* number of nodes.			*/
+	int m;									/* number of edges			*/
+	node_t *v;								/* pointer to array of n nodes.		*/
+	edge_t *e;								/* pointer to array of m edges.		*/
+	node_t *s;								/* pointer to the source.			*/
+	node_t *t;								/* pointer to the sink.			*/
+	node_t *excess; 						/* nodes with e > 0 except s,t.	*/
 	decision_t *task;
 	bool terminate;
 	int active_thread;
 	pthread_mutex_t graph_lock;
-	pthread_cond_t excess_cond;
 	pthread_barrier_t first_barrier;
 	pthread_barrier_t second_barrier;
 };
@@ -159,32 +156,6 @@ static int id(graph_t *g, node_t *v) // this function can be used when we want t
 
 void error(const char *fmt, ...)
 {
-	/* print error message and exit.
-	 *
-	 * it can be used as printf with formatting commands such as:
-	 *
-	 *	error("height is negative %d", v->h);
-	 *
-	 * the rest is only for the really curious. the va_list
-	 * represents a compiler-specific type to handle an unknown
-	 * number of arguments for this error function so that they
-	 * can be passed to the vsprintf function that prints the
-	 * error message to buf which is then printed to stderr.
-	 *
-	 * the compiler needs to keep track of which parameters are
-	 * passed in integer registers, floating point registers, and
-	 * which are instead written to the stack.
-	 *
-	 * avoid ... in performance critical code since it makes
-	 * life for optimizing compilers much more difficult. but in
-	 * in error functions, they obviously are fine (unless we are
-	 * sufficiently paranoid and don't want to risk an error
-	 * condition escalate and crash a car or nuclear reactor
-	 * instead of doing an even safer shutdown (corrupted memory
-	 * can cause even more damage if we trust the stack is in good
-	 * shape)).
-	 *
-	 */
 
 	va_list ap;
 	char buf[BUFSIZ];
@@ -203,21 +174,6 @@ static int next_int()
 {
 	int x;
 	int c;
-
-	/* this is like Java's nextInt to get the next integer.
-	 *
-	 * we read the next integer one digit at a time which is
-	 * simpler and faster than using the normal function
-	 * fscanf that needs to do more work.
-	 *
-	 * we get the value of a digit character by subtracting '0'
-	 * so the character '4' gives '4' - '0' == 4
-	 *
-	 * it works like this: say the next input is 124
-	 * x is first 0, then 1, then 10 + 2, and then 120 + 4.
-	 *
-	 */
-
 	x = 0;
 	while (isdigit(c = getchar()))
 		x = 10 * x + c - '0';
@@ -318,26 +274,17 @@ static graph_t *new_graph(FILE *in, int n, int m) // return an adress (pointer) 
 
 	g->n = n;
 	g->m = m;
-	g->active_thread = 0;			   // for termination
-	g->v = xcalloc(n, sizeof(node_t)); // pointer to an array of node_t struct
-	g->e = xcalloc(m, sizeof(edge_t)); // pointer to an array of edge_t struct
-	g->terminate = false;
-	for (int i = 0; i < n; i++)
-	{
-		pthread_mutex_init(&g->v[i].node_lock, NULL); // init the lock for nodes
-	}
+	g->active_thread = 0;			   			// for termination
+	g->v = xcalloc(n, sizeof(node_t)); 			// pointer to an array of node_t struct
+	g->e = xcalloc(m, sizeof(edge_t)); 			// pointer to an array of edge_t struct
+	g->terminate = false;						// this flag for termination. 
 
-	for (int i = 0; i < m; i++)
-	{ // init the lock for edges.
-		pthread_mutex_init(&g->e[i].edge_lock, NULL);
-	}
-
-	g->s = &g->v[0];						  // g->s: is a pointer that point to the address of first v element
-	g->t = &g->v[n - 1];					  // &g->v[0] the address of the first node
-	g->excess = NULL;						  // &g->v[n-1] gets the address of the last element in array v
-	g->task = NULL;							  // create linked list for task.
-	pthread_mutex_init(&g->graph_lock, NULL); // init the lock for the whole graph.
-	//pthread_cond_init(&g->excess_cond, NULL);
+	g->s = &g->v[0];						    // g->s: is a pointer that point to the address of first v element
+	g->t = &g->v[n - 1];					  	// &g->v[0] the address of the first node
+	g->excess = NULL;						  	// &g->v[n-1] gets the address of the last element in array v
+	g->task = NULL;							  	// create linked list for task.
+	pthread_mutex_init(&g->graph_lock, NULL); 	// init the lock for the whole graph.
+	
 	pthread_barrier_init(&g->first_barrier, NULL, NUM_THREADS+1);
 	pthread_barrier_init(&g->second_barrier, NULL, NUM_THREADS+1);
 
@@ -622,30 +569,24 @@ int preflow(graph_t *g)
 
 	
 	while(true){
-		pr("main thread wait \n");
 		pthread_barrier_wait(&g->first_barrier);
 		decision_t* c = get_decision(g);
-		pr("inside of main\n");
-		while(c != NULL){
+		while(c != NULL){                                                              	//loop through all decisions 
 			switch (c->type)
 			{
 			case PUSH:
-				pr("doing a push \n");
 				push(g, c->u, c->v, c->e);
 				break;
 			case RELABEL:
-				pr("doing a relabel \n");
 				relabel(g, c->u);
 				break;
 			default: 
-				printf("ERROR");
 				break;
 			}
-			free(c);
-			c = get_decision(g);
+			free(c);                                                                    // release the data point.
+			c = get_decision(g);														// get the next decision.
 		}
 		if(g->excess == NULL){
-			pr("should terminate");
 			g->terminate = true;
 			pthread_barrier_wait(&g->second_barrier);
 			break;
@@ -676,7 +617,7 @@ static void free_graph(graph_t *g) // this function releases all the memory allo
 	}
 
 	for (i = 0; i < g->n; i += 1)
-	{ // ADD the logic for destroying lock and condtion here.
+	{ 
 		p = g->v[i].edge;
 		while (p != NULL)
 		{
