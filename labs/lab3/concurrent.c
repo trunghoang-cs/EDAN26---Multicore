@@ -15,7 +15,7 @@
 #include <stdbool.h> // for using the boolean value.
 #include <pthread.h> // import the lib for using thread in C
 
-#define PRINT 1 /* enable/disable prints. */
+#define PRINT 0 /* enable/disable prints. */
 
 
 #if PRINT
