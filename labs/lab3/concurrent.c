@@ -15,7 +15,7 @@
 #include <stdbool.h> // for using the boolean value.
 #include <pthread.h> // import the lib for using thread in C
 
-#define PRINT 0 /* enable/disable prints. */
+#define PRINT 1 /* enable/disable prints. */
 
 
 #if PRINT
@@ -28,7 +28,7 @@
 #define pr(...) /* no effect at all */
 #endif
 
-const int NUM_THREADS = 15;
+const int NUM_THREADS = 9;
 
 #define MIN(a, b) (((a) <= (b)) ? (a) : (b))
 
@@ -46,6 +46,7 @@ typedef struct node_t node_t;
 typedef struct edge_t edge_t;
 typedef struct list_t list_t;
 typedef struct decision_t decision_t; 
+typedef struct thread_arg_t thread_arg_t;
 
 struct list_t
 {
@@ -78,11 +79,11 @@ struct graph_t
 	edge_t *e;								/* pointer to array of m edges.		*/
 	node_t *s;								/* pointer to the source.			*/
 	node_t *t;								/* pointer to the sink.			*/
-	node_t *excess; 						/* nodes with e > 0 except s,t.	*/
-	decision_t *task;
+	node_t **excess; 						/* pointer to pointer */
+	decision_t **task;
+	decision_t ** update_pointer;               		/* pointer to pointer */
 	bool terminate;
 	int active_thread;
-	pthread_mutex_t graph_lock;
 	pthread_barrier_t first_barrier;
 	pthread_barrier_t second_barrier;
 };
@@ -99,6 +100,12 @@ struct decision_t
 	node_t *v;
 	edge_t *e;
 	decision_t* next;
+};
+
+struct thread_arg_t
+{
+	graph_t* g;
+	int queue_nbr;
 };
 
 /* a remark about C arrays. the phrase above 'array of n nodes' is using
@@ -252,7 +259,7 @@ static void connect(node_t *u, node_t *v, int c, edge_t *e)
 	 *
 	 */
 
-	e->u = u; // set 1 endpoint of the edge to u.
+	e->u = u; // set 1 endpoint of the edge to u.g
 	e->v = v; // Set 1 endpoint of the edge to v.
 	e->c = c; // set the new capacity connecting 2 nodes.
 
@@ -281,9 +288,9 @@ static graph_t *new_graph(FILE *in, int n, int m) // return an adress (pointer) 
 
 	g->s = &g->v[0];						    // g->s: is a pointer that point to the address of first v element
 	g->t = &g->v[n - 1];					  	// &g->v[0] the address of the first node
-	g->excess = NULL;						  	// &g->v[n-1] gets the address of the last element in array v
-	g->task = NULL;							  	// create linked list for task.
-	pthread_mutex_init(&g->graph_lock, NULL); 	// init the lock for the whole graph.
+	g->excess = xcalloc(NUM_THREADS, sizeof(node_t*));						  	// &g->v[n-1] gets the address of the last element in array v
+	g->task = xcalloc(NUM_THREADS, sizeof(decision_t));							  	// create linked list for task.
+	g->update_pointer = xcalloc(NUM_THREADS, sizeof(decision_t*));
 	
 	pthread_barrier_init(&g->first_barrier, NULL, NUM_THREADS+1);
 	pthread_barrier_init(&g->second_barrier, NULL, NUM_THREADS+1);
@@ -311,18 +318,18 @@ static void enter_excess(graph_t *g, node_t *v)
 	 * it first is simplest.
 	 *
 	 */
-
+	int i = (v - g -> v) % NUM_THREADS;
 	if (v != g->t && v != g->s)
 	{ // only the node which not are source or sink, can be added to the excess_list.
-		pthread_mutex_lock(&g->graph_lock);
-		v->next = g->excess;
-		g->excess = v;
-		pthread_mutex_unlock(&g->graph_lock);
+		//pthread_mutex_lock(&g->graph_lock);
+		v->next = g->excess[i];
+		g->excess[i] = v;
+		//pthread_mutex_unlock(&g->graph_lock);
 		//pthread_cond_broadcast(&g->excess_cond);
 	}
 }
 
-static node_t *leave_excess(graph_t *g)
+static node_t *leave_excess(graph_t *g, int i)
 {
 	node_t *v;
 
@@ -330,11 +337,10 @@ static node_t *leave_excess(graph_t *g)
 	 * and for simplicity we always take the first.
 	 *
 	 */
-
-	v = g->excess; // v points at the first elment in the array
+	v = g->excess[i]; // v points at the first elment in the array
 
 	if (v != NULL)
-		g->excess = v->next; // make the g->excess points at the next node in the list.
+		g->excess[i] = v->next; // make the g->excess points at the next node in the list.
 
 	return v;
 }
@@ -354,7 +360,7 @@ static void push(graph_t *g, node_t *u, node_t *v, edge_t *e)
 		e->f -= d;
 	}
 
-	pr("pushing %d\n", d);
+	//pr("pushing %d\n", d);
 
 	u->e -= d;
 	v->e += d;
@@ -403,65 +409,88 @@ static node_t *other(node_t *u, edge_t *e)
 
 bool predicate(graph_t *g) /* return true if excess is empty*/
 {
-	if (g->excess != NULL)
-	{
-		return true;
+	for (int i = 0; i < NUM_THREADS; i++){
+		if (g -> excess[i] != NULL){
+			return false;
+		}
 	}
-	return false;
+	return true;
+}
+
+
+decision_t* create_decision(int type, node_t* u, node_t* v, edge_t* e){
+	decision_t* decision = xmalloc(sizeof(decision_t));
+	decision->u = u; 
+	decision->v = v;
+	decision->e = e;
+	decision->type = type;
+	decision->next = NULL;
+	return decision;
 }
 
 void relabel_decision(graph_t* g, node_t* u){
-	pr("decision RELABEL\n");
-	decision_t* push_decision = xmalloc(sizeof(decision_t));
-	push_decision->u = u; 
-	push_decision->v = NULL;
-	push_decision->e = NULL;
-	push_decision->type = RELABEL;
-	push_decision->next = NULL;
-	pthread_mutex_lock(&g->graph_lock);
-	if(g->task != NULL){
-		push_decision->next = g->task;
-		g->task = push_decision;
-	}
-	else{
-		g->task = push_decision;
-	}
-	pthread_mutex_unlock(&g->graph_lock);
-}
-
-void push_decision(graph_t* g, node_t* u, node_t* v, edge_t* e ){
-	pr("decision PUSH \n");
-	decision_t* push_decision = xmalloc(sizeof(decision_t));
-	push_decision->u = u; 
-	push_decision->v = v;
-	push_decision->e = e;
-	push_decision->type = PUSH;
-	push_decision->next = NULL;
-	pthread_mutex_lock(&g->graph_lock);
-	if(g->task != NULL){
-		push_decision->next = g->task;
-		g->task = push_decision;
-	}
-	else{
-		g->task = push_decision;
-	}
-	pthread_mutex_unlock(&g->graph_lock);
-
-}
-
-decision_t* get_decision(graph_t* g){
-	if(g->task == NULL) return NULL;
-	decision_t* c = g->task;
-	g->task = c->next;
 	
-	return c;
+	int i = (u - g -> v) % NUM_THREADS;
+	decision_t* c;
+	if (g->update_pointer[i] == NULL ){
+		c = create_decision(RELABEL, u, NULL, NULL);
+		if(g->task[i] != NULL){
+		 	c->next = g->task[i];
+		 	g->task[i] = c;
+	 	}
+	 	else{
+			 g->task[i] = c;
+	 } 
+	}else{
+		c = g -> update_pointer[i];
+		if(c->type == NONE){
+			c->u = u;
+			c->v = NULL;
+			c->e = NULL;
+			c->type = RELABEL;
+			g -> update_pointer[i] = c -> next;	
+		}
+		else{
+			pr("queue update is corrupted");
+		}
+	}
+	
+}
+
+void push_decision(graph_t* g, node_t* u, node_t* v, edge_t* e){
+	
+	int i = (u - g -> v) % NUM_THREADS;
+	decision_t* c;
+	if (g->update_pointer[i] == NULL ){
+		c = create_decision(PUSH, u, v, e);
+		if(g->task[i] != NULL){
+		 	c->next = g->task[i];
+		 	g->task[i] = c;
+	 	}
+	 	else{
+			 g->task[i] = c;
+	 } 
+	}else{
+		c = g -> update_pointer[i];
+		if(c->type == NONE){
+			c->u = u;
+			c->v = v;
+			c->e = e;
+			c->type = PUSH;
+			g -> update_pointer[i] = c -> next;	
+		}
+		else{
+			pr("queue update is corrupted");
+		}
+	}
+
 }
 
 void make_decision(graph_t *g, node_t *u)
 {
 	list_t *edges;
 	edge_t *e;
-	node_t *v;
+	node_t *v; 	
 	int b;
 
 	edges = u->edge;
@@ -499,30 +528,35 @@ void make_decision(graph_t *g, node_t *u)
 	{
 		relabel_decision(g, u);        //change the logic here! 
 	}
-	pr("inside make decision: BLOCKED \n");
+	//pr("inside make decision: BLOCKED \n");
 	pthread_barrier_wait(&g->first_barrier);
 	pthread_barrier_wait(&g->second_barrier);
 }
 
-void *worker(void *g)
+void *worker(void *att)
 {
-	graph_t *graph = (graph_t *)g;
+	thread_arg_t* arg = (thread_arg_t *)att;
+	graph_t* graph = arg -> g;
+	int index = arg ->queue_nbr;
 	node_t *u;
+	int counter = 0;
 
 	while (true)
 	{
-		pthread_mutex_lock(&graph->graph_lock);
+		//pthread_mutex_lock(&graph->graph_lock);
 		if(graph->terminate == true){
-			pthread_mutex_unlock(&graph->graph_lock);
+			//pthread_mutex_unlock(&graph->graph_lock);
+			pr("THREAD %d: number of proccessed node %d \n", index, counter);
 			break;
 		}
-		u = leave_excess(graph);
-		pthread_mutex_unlock(&graph->graph_lock);
+		u = leave_excess(graph, index);
+		//pthread_mutex_unlock(&graph->graph_lock);
 		if (u == NULL){
 			pthread_barrier_wait(&graph->first_barrier);
 			pthread_barrier_wait(&graph->second_barrier);
 			continue;
 		}
+		counter +=1;
 		make_decision(graph, u);
 	}
 
@@ -536,7 +570,7 @@ int preflow(graph_t *g)
 	node_t *v;
 	edge_t *e;
 	list_t *p;
-
+	thread_arg_t arg[NUM_THREADS];
 	pthread_t thread[NUM_THREADS];
 
 	s = g->s;                                       
@@ -544,8 +578,7 @@ int preflow(graph_t *g)
 
 	p = s->edge;
 
-	/* start by pushing as much as possible (limited by
-	 * the edge capacity) from the source to its neighbors.
+	/* initialize the push from the source node. 
 	 *
 	 */
 
@@ -561,34 +594,45 @@ int preflow(graph_t *g)
 	/* then loop until only s and/or t have excess preflow. */
 	for (int i = 0; i < NUM_THREADS; i++)
 	{
-		if (pthread_create(&thread[i], NULL, worker, (void *)g) != 0)
+		arg[i].g = g;
+		arg[i].queue_nbr = i;
+
+		if (pthread_create(&thread[i], NULL, worker, (void *)&arg[i]) != 0)
 		{
 			error("pthread_create failed");
 		}
 	}
 
+	int counter  = 0;
 	
 	while(true){
 		pthread_barrier_wait(&g->first_barrier);
-		decision_t* c = get_decision(g);
-		while(c != NULL){                                                              	//loop through all decisions 
-			switch (c->type)
-			{
-			case PUSH:
-				push(g, c->u, c->v, c->e);
-				break;
-			case RELABEL:
-				relabel(g, c->u);
-				break;
-			default: 
-				break;
+		
+		for(int i = 0; i < NUM_THREADS; i++){
+			decision_t* c = g ->task[i];
+			while (c != NULL && c -> type != NONE ){
+				switch (c->type)
+				{
+				case PUSH:
+					push(g, c->u, c->v, c->e);
+					break;
+				case RELABEL:
+					relabel(g, c->u);
+					break;
+				default: 
+					break;
+				}
+				counter += 1;
+				c -> type = NONE;                                                     // set the flag to NONE.
+				c = c -> next;														  // point to the next node. 
 			}
-			free(c);                                                                    // release the data point.
-			c = get_decision(g);														// get the next decision.
+			g -> update_pointer[i] = g -> task[i];
 		}
-		if(g->excess == NULL){
+
+		if(predicate(g)){
 			g->terminate = true;
 			pthread_barrier_wait(&g->second_barrier);
+			pr("MAIN THREAD: number of proccessed node %d \n", counter);
 			break;
 		}
 		pthread_barrier_wait(&g->second_barrier); 
@@ -610,11 +654,7 @@ static void free_graph(graph_t *g) // this function releases all the memory allo
 	int i;						   // but never free it using free function, this applied for dynamically
 	list_t *p;					   // allocated memory.
 	list_t *q;
-
-	for (i = 0; i < g->m; i += 1)
-	{
-		pthread_mutex_destroy(&g->e[i].edge_lock);
-	}
+	decision_t *d, *next_d;
 
 	for (i = 0; i < g->n; i += 1)
 	{ 
@@ -625,9 +665,31 @@ static void free_graph(graph_t *g) // this function releases all the memory allo
 			free(p);
 			p = q;
 		}
-		pthread_mutex_destroy(&g->v[i].node_lock);
 	}
-	pthread_mutex_destroy(&g->graph_lock);
+
+	// Free task queues (decision linked lists)
+    if (g->task != NULL) {
+        for (i = 0; i < NUM_THREADS; i++) {
+            d = g->task[i];
+            while (d != NULL) {
+                next_d = d->next;
+                free(d);
+                d = next_d;
+            }
+        }
+        free(g->task);  // Free the task array itself
+    }
+
+	// Free update pointer array
+    if (g->update_pointer != NULL) {
+        free(g->update_pointer);
+    }
+
+    // Free excess pointer array  
+    if (g->excess != NULL) {
+        free(g->excess);
+    }
+
 	pthread_barrier_destroy(&g->first_barrier);
 	pthread_barrier_destroy(&g->second_barrier);
 	free(g->v);

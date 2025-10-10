@@ -6,4 +6,47 @@ to run with valgrind/helgrind:
 
 valgrind --tool=helgrind ./preflow < ../../data
 
+Time: no blocking:
 
+real    1m54.771s
+user    0m30.971s
+sys     2m17.436s
+
+./concurrent < ../data/big/001.in
+THREAD 4: number of proccessed node 723 
+THREAD 5: number of proccessed node 687 
+THREAD 0: number of proccessed node 610       
+THREAD 7: number of proccessed node 703       
+THREAD 6: number of proccessed node 732       
+THREAD 8: number of proccessed node 660       
+MAIN THREAD: number of proccessed node 6281   
+THREAD 1: number of proccessed node 674       
+THREAD 2: number of proccessed node 671       
+THREAD 3: number of proccessed node 821       
+f = 10932
+
+./concurrent < ../data/big/002.in
+THREAD 5: number of proccessed node 258783 
+THREAD 2: number of proccessed node 258944 
+THREAD 8: number of proccessed node 292812 
+THREAD 4: number of proccessed node 260408     
+THREAD 7: number of proccessed node 264789     
+THREAD 0: number of proccessed node 252979     
+THREAD 3: number of proccessed node 261822     
+MAIN THREAD: number of proccessed node 2372346 
+THREAD 1: number of proccessed node 257558     
+THREAD 6: number of proccessed node 264251     
+f = 8689
+
+ ./concurrent < ../data/huge/001.in                                                                                                     
+MAIN THREAD: number of proccessed node 85373 
+THREAD 3: number of proccessed node 9478
+THREAD 0: number of proccessed node 9480
+THREAD 5: number of proccessed node 9466 
+THREAD 2: number of proccessed node 9461
+THREAD 8: number of proccessed node 9469
+THREAD 4: number of proccessed node 9541
+THREAD 1: number of proccessed node 9588
+THREAD 7: number of proccessed node 9440
+THREAD 6: number of proccessed node 9450
+f = 3930947
