@@ -49,6 +49,6 @@ THREAD 6: number of proccessed node 9450
 f = 3930947
 
 Time: no blocking:
-real 0m20.550s
-user 0m20.343s
-sys 0m16.662s
+real    0m13.107s
+user    0m13.498s
+sys     0m11.342s
