@@ -428,9 +428,9 @@ decision_t* create_decision(int type, node_t* u, node_t* v, edge_t* e){
 	return decision;
 }
 
-void relabel_decision(graph_t* g, node_t* u){
+void relabel_decision(graph_t* g, node_t* u, int i){
 	
-	int i = (u - g -> v) % NUM_THREADS;
+	//int i = (u - g -> v) % NUM_THREADS;
 	decision_t* c;
 	if (g->update_pointer[i] == NULL ){
 		c = create_decision(RELABEL, u, NULL, NULL);
@@ -457,9 +457,9 @@ void relabel_decision(graph_t* g, node_t* u){
 	
 }
 
-void push_decision(graph_t* g, node_t* u, node_t* v, edge_t* e){
+void push_decision(graph_t* g, node_t* u, node_t* v, edge_t* e, int i){
 	
-	int i = (u - g -> v) % NUM_THREADS;
+	//int i = (u - g -> v) % NUM_THREADS;
 	decision_t* c;
 	if (g->update_pointer[i] == NULL ){
 		c = create_decision(PUSH, u, v, e);
@@ -486,7 +486,7 @@ void push_decision(graph_t* g, node_t* u, node_t* v, edge_t* e){
 
 }
 
-void make_decision(graph_t *g, node_t *u)
+void make_decision(graph_t *g, node_t *u, int i)
 {
 	list_t *edges;
 	edge_t *e;
@@ -522,15 +522,15 @@ void make_decision(graph_t *g, node_t *u)
 
 	if (v != NULL)
 	{
-		push_decision(g, u, v, e);     //change logic here!
+		push_decision(g, u, v, e, i);     //change logic here!
 	}
 	else
 	{
-		relabel_decision(g, u);        //change the logic here! 
+		relabel_decision(g, u, i);        //change the logic here! 
 	}
 	//pr("inside make decision: BLOCKED \n");
-	pthread_barrier_wait(&g->first_barrier);
-	pthread_barrier_wait(&g->second_barrier);
+	//pthread_barrier_wait(&g->first_barrier);
+	//pthread_barrier_wait(&g->second_barrier);
 }
 
 void *worker(void *att)
@@ -539,13 +539,14 @@ void *worker(void *att)
 	graph_t* graph = arg -> g;
 	int index = arg ->queue_nbr;
 	node_t *u;
+	node_t* c;
 	int counter = 0;
 
 	while (true)
 	{
-		//pthread_mutex_lock(&graph->graph_lock);
+		
 		if(graph->terminate == true){
-			//pthread_mutex_unlock(&graph->graph_lock);
+	
 			pr("THREAD %d: number of proccessed node %d \n", index, counter);
 			break;
 		}
@@ -557,7 +558,7 @@ void *worker(void *att)
 			continue;
 		}
 		counter +=1;
-		make_decision(graph, u);
+		make_decision(graph, u, index);
 	}
 
 	return NULL;
