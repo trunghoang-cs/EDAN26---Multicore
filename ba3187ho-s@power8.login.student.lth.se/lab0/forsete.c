@@ -1,43 +1,29 @@
-/* This is an implementation of the preflow-push algorithm, by
- * Goldberg and Tarjan, for the 2021 EDAN26 Multicore programming labs.
+/* This is essentially the same as preflow.c in this directory, lab0.
  *
- * It is intended to be as simple as possible to understand and is
- * not optimized in any way.
+ * if you compile it with: 
+ *	gcc -DMAIN forsete.c 
+ * then it is the same as preflow.c
+ * and without -DMAIN, it can be used to submit at forsete.cs.lth.se
  *
- * You should NOT read everything for this course.
+ * The -DMAIN defines a macro which is then tested in this file with 
  *
- * Focus on what is most similar to the pseudo code, i.e., the functions
- * preflow, push, and relabel.
- *
- * Some things about C are explained which are useful for everyone  
- * for lab 3, and things you most likely want to skip have a warning 
- * saying it is only for the curious or really curious. 
- * That can safely be ignored since it is not part of this course.
- *
- * Compile and run with: make
- *
- * Enable prints by changing from 1 to 0 at PRINT below.
- *
- * Feel free to ask any questions about it on Discord 
- * at #lab0-preflow-push
- *
- * A variable or function declared with static is only visible from
- * within its file so it is a good practice to use in order to avoid
- * conflicts for names which need not be visible from other files.
- *
+ * #ifdef MAIN
+ *      do things as in preflow.c (read a text file in new_graph) 
+ *      and with a main function.
+ * #else
+ *      use a new_graph function with parameter from forsete's main.
+ * #endif
  */
- 
+
 #include <assert.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdatomic.h>
 
-volatile int hello;
-
-#define PRINT		0	/* enable/disable prints. */
+#define PRINT		0	/* enable/disable prints.	*/
+#define TIME		0	/* for timing on power.		*/
 
 /* the funny do-while next clearly performs one iteration of the loop.
  * if you are really curious about why there is a loop, please check
@@ -68,6 +54,14 @@ typedef struct graph_t	graph_t;
 typedef struct node_t	node_t;
 typedef struct edge_t	edge_t;
 typedef struct list_t	list_t;
+
+typedef struct xedge_t	xedge_t;
+
+struct xedge_t {
+	int		u;	/* one of the two nodes.	*/
+	int		v;	/* the other. 			*/
+	int		c;	/* capacity.			*/
+};
 
 struct list_t {
 	edge_t*		edge;
@@ -120,6 +114,12 @@ struct graph_t {
  * as any basic type such as int.
  * 
  */
+
+#ifdef MAIN
+static graph_t* new_graph(FILE* in, int n, int m);
+#else
+static graph_t* new_graph(int n, int m, int s, int t, xedge_t* e);
+#endif
 
 static char* progname;
 
@@ -277,7 +277,7 @@ static void add_edge(node_t* u, edge_t* e)
 	 *
 	 */
 
-	p = xmalloc(sizeof(list_t)); // alocate memory for a new list_t element (p)
+	p = xmalloc(sizeof(list_t));
 	p->edge = e;
 	p->next = u->edge;
 	u->edge = p;
@@ -296,40 +296,6 @@ static void connect(node_t* u, node_t* v, int c, edge_t* e)
 
 	add_edge(u, e);
 	add_edge(v, e);
-}
-
-static graph_t* new_graph(FILE* in, int n, int m)
-{
-	graph_t*	g;
-	node_t*		u;
-	node_t*		v;
-	int		i;
-	int		a;
-	int		b;
-	int		c;
-	
-	g = xmalloc(sizeof(graph_t));
-
-	g->n = n;
-	g->m = m;
-	
-	g->v = xcalloc(n, sizeof(node_t));
-	g->e = xcalloc(m, sizeof(edge_t));
-
-	g->s = &g->v[0];
-	g->t = &g->v[n-1];
-	g->excess = NULL;
-
-	for (i = 0; i < m; i += 1) {
-		a = next_int();
-		b = next_int();
-		c = next_int();
-		u = &g->v[a];
-		v = &g->v[b];
-		connect(u, v, c, g->e+i);
-	}
-
-	return g;
 }
 
 static void enter_excess(graph_t* g, node_t* v)
@@ -412,9 +378,8 @@ static void push(graph_t* g, node_t* u, node_t* v, edge_t* e)
 
 static void relabel(graph_t* g, node_t* u)
 {
-	hello &= 0x1234;
 	u->h += 1;
-	hello &= 0x5678;
+
 	pr("relabel %d now h = %d\n", id(g, u), u->h);
 
 	enter_excess(g, u);
@@ -428,7 +393,7 @@ static node_t* other(node_t* u, edge_t* e)
 		return e->u;
 }
 	
-int preflow(graph_t* g)
+static int xpreflow(graph_t* g)
 {
 	node_t*		s;
 	node_t*		u;
@@ -502,6 +467,29 @@ int preflow(graph_t* g)
 	return g->t->e;
 }
 
+static void free_graph(graph_t* g);
+
+int preflow(int n, int m, int s, int t, xedge_t* e)
+{
+	graph_t*	g;
+	int		f;
+	double		begin;
+	double		end;
+
+#if TIME
+	init_timebase();
+	begin = timebase_sec();
+#endif
+	g = new_graph(n, m, s, t, e);
+	f = xpreflow(g);
+	free_graph(g);
+#if TIME
+	end = timebase_sec();
+	printf("t = %10.3lf s\n", end-begin);
+#endif
+	return f;
+}
+
 static void free_graph(graph_t* g)
 {
 	int		i;
@@ -519,6 +507,42 @@ static void free_graph(graph_t* g)
 	free(g->v);
 	free(g->e);
 	free(g);
+}
+
+#ifdef MAIN
+
+static graph_t* new_graph(FILE* in, int n, int m)
+{
+	graph_t*	g;
+	node_t*		u;
+	node_t*		v;
+	int		i;
+	int		a;
+	int		b;
+	int		c;
+	
+	g = xmalloc(sizeof(graph_t));
+
+	g->n = n;
+	g->m = m;
+	
+	g->v = xcalloc(n, sizeof(node_t));
+	g->e = xcalloc(m, sizeof(edge_t));
+
+	g->s = &g->v[0];
+	g->t = &g->v[n-1];
+	g->excess = NULL;
+
+	for (i = 0; i < m; i += 1) {
+		a = next_int();
+		b = next_int();
+		c = next_int();
+		u = &g->v[a];
+		v = &g->v[b];
+		connect(u, v, c, g->e+i);
+	}
+
+	return g;
 }
 
 int main(int argc, char* argv[])
@@ -552,3 +576,40 @@ int main(int argc, char* argv[])
 
 	return 0;
 }
+
+#else
+
+static graph_t* new_graph(int n, int m, int s, int t, xedge_t* e)
+{
+	graph_t*	g;
+	node_t*		u;
+	node_t*		v;
+	int		i;
+	int		a;
+	int		b;
+	int		c;
+	
+	g = xmalloc(sizeof(graph_t));
+
+	g->n = n;
+	g->m = m;
+	
+	g->v = xcalloc(n, sizeof(node_t));
+	g->e = xcalloc(m, sizeof(edge_t));
+
+	g->s = &g->v[0];
+	g->t = &g->v[n-1];
+	g->excess = NULL;
+
+	for (i = 0; i < m; i += 1) {
+		a = e[i].u;
+		b = e[i].v;
+		c = e[i].c;
+		u = &g->v[a];
+		v = &g->v[b];
+		connect(u, v, c, g->e+i);
+	}
+
+	return g;
+}
+#endif

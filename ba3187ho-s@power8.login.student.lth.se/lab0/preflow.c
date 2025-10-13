@@ -33,9 +33,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdatomic.h>
-
-volatile int hello;
 
 #define PRINT		0	/* enable/disable prints. */
 
@@ -412,9 +409,8 @@ static void push(graph_t* g, node_t* u, node_t* v, edge_t* e)
 
 static void relabel(graph_t* g, node_t* u)
 {
-	hello &= 0x1234;
 	u->h += 1;
-	hello &= 0x5678;
+
 	pr("relabel %d now h = %d\n", id(g, u), u->h);
 
 	enter_excess(g, u);

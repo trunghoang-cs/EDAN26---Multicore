@@ -14,7 +14,6 @@
 #include <string.h>
 #include <stdbool.h> // for using the boolean value.
 #include <pthread.h> // import the lib for using thread in C
-#include <stdatomic.h>
 
 #define PRINT 0 /* enable/disable prints. */
 
@@ -59,7 +58,6 @@ struct node_t
 {
 	int h;		  /* height.      */
 	int e;		  /* excess flow.			*/
-	atomic_int incomming;
 	list_t *edge; /* adjacency list.		*/
 	node_t *next; /* with excess preflow.		*/
 };
@@ -68,7 +66,6 @@ struct edge_t
 {
 	node_t *u; /* one of the two nodes.	*/
 	node_t *v; /* the other. 			*/
-	//atomic_int incomming;
 	int f;	   /* flow > 0 if from u to v.	*/
 	int c;	   /* capacity.			*/
 };
@@ -288,7 +285,7 @@ static graph_t *new_graph(FILE *in, int n, int m) // return an adress (pointer) 
 	g->v = xcalloc(n, sizeof(node_t)); 			// pointer to an array of node_t struct
 	g->e = xcalloc(m, sizeof(edge_t)); 			// pointer to an array of edge_t struct
 	g->terminate = false;						// this flag for termination. 
-    
+
 	g->s = &g->v[0];						    // g->s: is a pointer that point to the address of first v element
 	g->t = &g->v[n - 1];					  	// &g->v[0] the address of the first node
 	g->excess = xcalloc(NUM_THREADS, sizeof(node_t*));						  	// &g->v[n-1] gets the address of the last element in array v
@@ -323,9 +320,12 @@ static void enter_excess(graph_t *g, node_t *v)
 	 */
 	int i = (v - g -> v) % NUM_THREADS;
 	if (v != g->t && v != g->s)
-	{ 
+	{ // only the node which not are source or sink, can be added to the excess_list.
+		//pthread_mutex_lock(&g->graph_lock);
 		v->next = g->excess[i];
 		g->excess[i] = v;
+		//pthread_mutex_unlock(&g->graph_lock);
+		//pthread_cond_broadcast(&g->excess_cond);
 	}
 }
 
@@ -345,7 +345,7 @@ static node_t *leave_excess(graph_t *g, int i)
 	return v;
 }
 
-static void init_push(graph_t *g, node_t *u, node_t *v, edge_t *e)
+static void push(graph_t *g, node_t *u, node_t *v, edge_t *e)
 {
 	int d; /* remaining capacity of the edge. */
 
@@ -387,49 +387,16 @@ static void init_push(graph_t *g, node_t *u, node_t *v, edge_t *e)
 		//pthread_mutex_unlock(&g->graph_lock); // lock the entire graph after.
 	}
 }
-static void push(graph_t *g, node_t *u, node_t *v, edge_t *e)
-{
-	int d; /* remaining capacity of the edge. */
-	d = atomic_load_explicit(&u->incomming, memory_order_relaxed);
-	atomic_store_explicit(&u->incomming, 0,memory_order_relaxed);
-	u->e -= d;
-	v->e += d;
-	
-	if (u == e->u)
-	{
-		e->f += d;
-	}
-	else
-	{
-		e->f -= d;
-	}
-	
-
-	if ((u->e > 0) || (v->e == d))
-	{
-		//pthread_mutex_lock(&g->graph_lock); // lock the entrie graph before
-		if (u->e > 0)
-		{
-
-			enter_excess(g, u);
-		}
-
-		if (v->e == d)
-		{
-
-			enter_excess(g, v);
-		}
-		//pthread_mutex_unlock(&g->graph_lock); // lock the entire graph after.
-	}
-}
 
 static void relabel(graph_t *g, node_t *u)
 {
-	int u_index = u - g->v;
 	u->h += 1;
-    pr("RELABEL_DECISION: node[%d] (h=%d -> h=%d)\n", 
-        u_index, u->h, u->h + 1);
+
+	//pr("relabel %d now h = %d\n", id(g, u), u->h);
+
+	//pthread_mutex_lock(&g->graph_lock); // lock before entering section for modify excess(task)
 	enter_excess(g, u);
+	//pthread_mutex_unlock(&g->graph_lock); // unlock efter.
 }
 
 static node_t *other(node_t *u, edge_t *e)
@@ -491,11 +458,8 @@ void relabel_decision(graph_t* g, node_t* u, int i){
 }
 
 void push_decision(graph_t* g, node_t* u, node_t* v, edge_t* e, int i){
-	int u_index = u - g->v;
-    int v_index = v - g->v;
-    int e_index = e - g->e; 
-	pr("Push from %d to %d through edge %d", u_index, v_index, e_index);
-	//exit(1);
+	
+	//int i = (u - g -> v) % NUM_THREADS;
 	decision_t* c;
 	if (g->update_pointer[i] == NULL ){
 		c = create_decision(PUSH, u, v, e);
@@ -519,18 +483,6 @@ void push_decision(graph_t* g, node_t* u, node_t* v, edge_t* e, int i){
 			pr("queue update is corrupted");
 		}
 	}
-	int d; /* remaining capacity of the edge. */
-    pr("ENTERING atomic_push_update \n");
-	if (u == e->u)
-	{
-		d = MIN(u->e, e->c - e->f); // forward push: limited by the node excess flow and remain capacity.
-	}
-	else
-	{
-		d = MIN(u->e, e->c + e->f); // backward push: limited by the node excess flow and backward capacity
-	}
-	pr("push %d", d);
-	atomic_fetch_add_explicit(&u->incomming, d, memory_order_relaxed); 
 
 }
 
@@ -544,18 +496,18 @@ void make_decision(graph_t *g, node_t *u, int i)
 	edges = u->edge;
 
 	while (edges != NULL)
-	{					 
-		e = edges->edge; 
+	{					 // loop through all the edges
+		e = edges->edge; // get the first edge.
 		edges = edges->next;
 
 		if (u == e->u)
 		{
-			v = e->v; 
+			v = e->v; // Forward direction
 			b = 1;
 		}
 		else
 		{
-			v = e->u; 
+			v = e->u; // Backward direction
 			b = -1;
 		}
 		if (u->h > v->h && b * e->f < e->c)
@@ -570,14 +522,15 @@ void make_decision(graph_t *g, node_t *u, int i)
 
 	if (v != NULL)
 	{
-		push_decision(g, u, v, e, i);
-		//atomic_push_update(g, u, v, e);
+		push_decision(g, u, v, e, i);     //change logic here!
 	}
 	else
 	{
-		relabel_decision(g, u, i);         
+		relabel_decision(g, u, i);        //change the logic here! 
 	}
-	
+	//pr("inside make decision: BLOCKED \n");
+	//pthread_barrier_wait(&g->first_barrier);
+	//pthread_barrier_wait(&g->second_barrier);
 }
 
 void *worker(void *att)
@@ -587,7 +540,7 @@ void *worker(void *att)
 	int index = arg ->queue_nbr;
 	node_t *u;
 	node_t* c;
-	int counter = 0;                                      
+	int counter = 0;
 
 	while (true)
 	{
@@ -598,15 +551,13 @@ void *worker(void *att)
 			break;
 		}
 		u = leave_excess(graph, index);
-		
+		//pthread_mutex_unlock(&graph->graph_lock);
 		if (u == NULL){
-			pr("Thread %d waits", index);
 			pthread_barrier_wait(&graph->first_barrier);
 			pthread_barrier_wait(&graph->second_barrier);
 			continue;
 		}
 		counter +=1;
-		pr("Thread %d make decision\n", index );
 		make_decision(graph, u, index);
 	}
 
@@ -638,7 +589,7 @@ int preflow(graph_t *g)
 		p = p->next;
 
 		s->e += e->c;
-		init_push(g, s, other(s, e), e);
+		push(g, s, other(s, e), e);
 	}
 
 	/* then loop until only s and/or t have excess preflow. */
@@ -657,7 +608,7 @@ int preflow(graph_t *g)
 	
 	while(true){
 		pthread_barrier_wait(&g->first_barrier);
-		pr("main thread working \n");
+		
 		for(int i = 0; i < NUM_THREADS; i++){
 			decision_t* c = g ->task[i];
 			while (c != NULL && c -> type != NONE ){
@@ -695,6 +646,7 @@ int preflow(graph_t *g)
 			error("pthread_join failed");
 		}
 	}
+
 	return g->t->e;
 }
 

@@ -33,9 +33,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdatomic.h>
-
-volatile int hello;
 
 #define PRINT		0	/* enable/disable prints. */
 
@@ -89,12 +86,12 @@ struct edge_t {
 };
 
 struct graph_t {
-	int		n;	/* nodes.			*/
-	int		m;	/* edges.			*/
-	node_t*		v;	/* array of n nodes.		*/
-	edge_t*		e;	/* array of m edges.		*/
-	node_t*		s;	/* source.			*/
-	node_t*		t;	/* sink.			*/
+	int		n;	/* number of nodes.			*/
+	int		m;	/* number of edges			*/
+	node_t*		v;	/* pointer to array of n nodes.		*/
+	edge_t*		e;	/* pointer to array of m edges.		*/
+	node_t*		s;	/* pointer to the source.			*/
+	node_t*		t;	/* pointer to the sink.			*/
 	node_t*		excess;	/* nodes with e > 0 except s,t.	*/
 };
 
@@ -277,10 +274,11 @@ static void add_edge(node_t* u, edge_t* e)
 	 *
 	 */
 
-	p = xmalloc(sizeof(list_t)); // alocate memory for a new list_t element (p)
-	p->edge = e;
-	p->next = u->edge;
-	u->edge = p;
+	p = xmalloc(sizeof(list_t)); // alocate memory for a new list_t element (p).
+								 // the returned value is a pointer to newly allocated list_t struct.
+	p->edge = e;                 // set the edge pointer of p to e. 
+	p->next = u->edge;           // set the next pointer of p to the first edge of u.
+	u->edge = p;				 //	make p is the new head of u's adjacency list.
 }
 
 static void connect(node_t* u, node_t* v, int c, edge_t* e)
@@ -290,45 +288,45 @@ static void connect(node_t* u, node_t* v, int c, edge_t* e)
 	 *
 	 */
 
-	e->u = u;
-	e->v = v;
-	e->c = c;
+	e->u = u;                    // set 1 endpoint of the edge to u. 
+	e->v = v;                    // Set 1 endpoint of the edge to v. 
+	e->c = c;					 // set the new capacity connecting 2 nodes. 						
 
-	add_edge(u, e);
-	add_edge(v, e);
+	add_edge(u, e);             // add the edge to u's adjacency list.
+	add_edge(v, e);				// add the edge to v's adjacency list.
 }
 
-static graph_t* new_graph(FILE* in, int n, int m)
+static graph_t* new_graph(FILE* in, int n, int m) // return an adress (pointer) to a graph_t object. 
 {
-	graph_t*	g;
-	node_t*		u;
-	node_t*		v;
+	graph_t*	g;								  // pointer to a graph_t struct. 
+	node_t*		u;								  // pointer to a node_t struct. 
+	node_t*		v;								  // pointer to a node_v struct.
 	int		i;
 	int		a;
 	int		b;
 	int		c;
 	
-	g = xmalloc(sizeof(graph_t));
+	g = xmalloc(sizeof(graph_t));               // alocate the memory for the graph structure
 
 	g->n = n;
 	g->m = m;
 	
-	g->v = xcalloc(n, sizeof(node_t));
-	g->e = xcalloc(m, sizeof(edge_t));
+	g->v = xcalloc(n, sizeof(node_t));			// pointer to an array of node_t struct
+	g->e = xcalloc(m, sizeof(edge_t));          // pointer to an array of edge_t struct 
 
-	g->s = &g->v[0];
-	g->t = &g->v[n-1];
-	g->excess = NULL;
+	g->s = &g->v[0];                           // g->s: is a pointer that point to the address of first v element
+	g->t = &g->v[n-1];						   // &g->v[0] the address of the first node
+	g->excess = NULL;                          // &g->v[n-1] gets the address of the last element in array v
 
-	for (i = 0; i < m; i += 1) {
-		a = next_int();
+	for (i = 0; i < m; i += 1) { // loop through all edges
+		a = next_int();  
 		b = next_int();
 		c = next_int();
 		u = &g->v[a];
 		v = &g->v[b];
-		connect(u, v, c, g->e+i);
-	}
-
+		connect(u, v, c, g->e+i); // g->e is a pointer to the first element
+	}							  // g->e+i	is the pointer to the i-th edge				
+								  // the pointer references inside of edge struct will be added later.
 	return g;
 }
 
@@ -358,10 +356,10 @@ static node_t* leave_excess(graph_t* g)
 	 *
 	 */
 
-	v = g->excess;
+	v = g->excess; // v points at the first elment in the array
 
 	if (v != NULL)
-		g->excess = v->next;
+		g->excess = v->next; // make the g->excess points at the next node in the list.
 
 	return v;
 }
@@ -374,10 +372,10 @@ static void push(graph_t* g, node_t* u, node_t* v, edge_t* e)
 	pr("f = %d, c = %d, so ", e->f, e->c);
 	
 	if (u == e->u) {
-		d = MIN(u->e, e->c - e->f);
+		d = MIN(u->e, e->c - e->f); // forward push: limited by the node excess flow and remain capacity.
 		e->f += d;
 	} else {
-		d = MIN(u->e, e->c + e->f);
+		d = MIN(u->e, e->c + e->f); //backward push: limited by the node excess flow and backward capacity
 		e->f -= d;
 	}
 
@@ -412,9 +410,8 @@ static void push(graph_t* g, node_t* u, node_t* v, edge_t* e)
 
 static void relabel(graph_t* g, node_t* u)
 {
-	hello &= 0x1234;
 	u->h += 1;
-	hello &= 0x5678;
+
 	pr("relabel %d now h = %d\n", id(g, u), u->h);
 
 	enter_excess(g, u);
@@ -490,7 +487,7 @@ int preflow(graph_t* g)
 			if (u->h > v->h && b * e->f < e->c)
 				break;
 			else
-				v = NULL;
+				v = NULL; // if null means that the loop has gone through all its neighbour
 		}
 
 		if (v != NULL)
@@ -502,10 +499,10 @@ int preflow(graph_t* g)
 	return g->t->e;
 }
 
-static void free_graph(graph_t* g)
-{
-	int		i;
-	list_t*		p;
+static void free_graph(graph_t* g)   // this function releases all the memory allocated for the graph
+{									 // (using malloc & calloc, etc)	
+	int		i;						 // but never free it using free function, this applied for dynamically	
+	list_t*		p;					 // allocated memory.
 	list_t*		q;
 
 	for (i = 0; i < g->n; i += 1) {

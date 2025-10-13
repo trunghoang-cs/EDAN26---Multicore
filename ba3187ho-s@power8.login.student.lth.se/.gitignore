@@ -1,0 +1,56 @@
+# Ignore build artifacts and outputs in all labs subfolders
+labs/**/target/
+labs/**/out
+labs/**/all-output
+labs/**/target/**/*.class
+labs/**/target/**/*.jar
+labs/**/target/**/*.zip
+labs/**/target/**/*.log
+labs/**/target/streams/
+labs/**/project/target/
+labs/**/.bloop/
+labs/**/.metals/
+labs/**/.vscode/
+labs/**/sbt-dist/
+labs/**/build.sbt
+labs/**/build.properties
+lab1/all-output
+
+# Ignore compiled binaries and executables
+*.out
+*.exe
+*.class
+*.jar
+
+# Ignore object files, shared libraries, and build artifacts
+*.o
+*.so
+*.dll
+*.a
+
+# Rust build artifacts
+Cargo.lock
+
+# Auxiliary and temporary files
+*.aux
+*.toc
+*~
+*.swp
+
+# Data outputs and answers (if not source)
+*.ans
+*.in
+
+# Ignore check-solution scripts
+check-solution.sh
+
+# Other temp files
+CACHEDIR.TAG
+
+# Ignore Clojure compiled files
+*.class
+
+# Ignore README, makefile, and PDF only if not source (remove if you want to track them)
+# README
+# makefile
+# *.pdf
