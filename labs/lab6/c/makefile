@@ -1,4 +1,4 @@
 main:
-	gcc -o preflow preflow.c pthread_barrier.c -g -O3 -pthread -fgnu-tm
-	time sh check-solution.sh ./preflow
+	gcc -o concurrent concurrent.c pthread_barrier.c -g -O3 -pthread -fgnu-tm
+	time sh check-solution.sh ./concurrent
 	@echo PASS all tests
