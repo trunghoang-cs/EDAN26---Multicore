@@ -1,5 +1,7 @@
 (require '[clojure.string :as str])		; for splitting an input line into words
 
+(def num-threads 9)
+
 (def debug false)
 
 (defn prepend [list value] (cons value list))	; put value at the front of list
@@ -171,7 +173,10 @@
 
 (defn preflow []
 	(dosync (initial-pushes nodes edges s t excess-nodes))
-	(dosync (worker excess-nodes))
+	;(dosync (worker excess-nodes))
+		(let [threads (repeatedly num-threads #(Thread. (fn[] (worker excess-nodes ))))] ; wrap in a Runnable func, no parameter.
+		(run! #(.start %) threads)		
+		(run! #(.join %) threads))
 	(println "f =" (node-excess @(nodes t))))
 
 (preflow)
