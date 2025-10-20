@@ -152,32 +152,22 @@
 (defn discharge [n]
   (let [adj-list (node-adj @(nodes n))]
     ; Try to push on all edges
-    (doseq [edge-index adj-list]
+    (doseq [edge-index adj-list]    ; iterate over the collection, get different edge-index
       (when (has-excess n nodes)
         (push edge-index n nodes edges excess-nodes s t)))
     ; After trying all edges, if still has excess, must relabel
-    (when (has-excess n nodes)
+    (when (has-excess n nodes)      
       (dosync
-	  	;(println "relabel" n)
-        (ref-set (nodes n) (update @(nodes n) :h + 1))
-        (check-insert excess-nodes n s t)))))
-
+        (ref-set (nodes n) (update @(nodes n) :h + 1))             ; update the height of the node.
+        (check-insert excess-nodes n s t)))))					   ; insert the node to excess-nodes
 
 (defn worker [excess-nodes]
-  (loop []
-    (let [u (dosync (remove-any excess-nodes))]
-      ;(println "worker push" u)
-      (if (not= u -1)
+    (let [u (dosync (remove-any excess-nodes))]    ; take the node with excess preflow.
+      (if (not= u -1)							   ; if the node is not -1.
         (do 
-          ;(println "not -1")
-          ;(println "current node" u)
-          (discharge u)
-          (recur)
-		  )
-        ; When u = -1, exit (do nothing)
-        ))))
-
-
+          (discharge u)							   ; call discharge func on u. 
+          (recur excess-nodes)					   ; recursive call the worker func (tail recursion).
+		  ))))									   ; prevent stack overflow.
 
 (defn preflow []
 	(dosync (initial-pushes nodes edges s t excess-nodes))
