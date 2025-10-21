@@ -8,21 +8,22 @@ float sum;
 float a[N][N];
 float b[N][N];
 float c[N][N];
-
+float c_temp[N][N];
 
 
 void matmul()
 {
 	int	i, j, k;
 
-	#pragma omp parallel private (i, j , k)
+	#pragma omp parallel private (i, j, k)
 	#pragma omp for schedule (static, N/omp_get_num_procs())
 	for (i = 0; i < N; i += 1) {
 		for (j = 0; j < N; j += 1) {
-			a[i][j] = 0;
+			a[i][j] = 0;          
+			                   //using temp variable instead 
 			for (k = 0; k < N; k += 1) {
-				a[i][j] += b[i][k] * c[k][j];
-			}
+				a[i][j] += b[i][k] * c_temp[j][k];
+			} 
 		}
 	}
 }
@@ -35,6 +36,11 @@ void init()
 		for (j = 0; j < N; j += 1) {
 			b[i][j] = 12 + i * j * 13;
 			c[i][j] = -13 + i + j * 21;
+		}
+	}
+	for (i = 0; i < N; i += 1) {
+		for (j = 0; j < N; j += 1) {
+			c_temp[j][i] = c[i][j];       
 		}
 	}
 }
